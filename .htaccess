@@ -1,0 +1,5 @@
+Options -Indexes
+<IfModule mod_headers.c>
+  Header set X-Frame-Options "ALLOWALL"
+  Header set Content-Security-Policy "frame-ancestors *;"
+</IfModule>

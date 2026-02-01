@@ -1,0 +1,19 @@
+{
+  "name": "GreyTG for Bitrix24 (MVP)",
+  "description": "Chat with customers via personal Telegram accounts using Grey TG API.",
+  "version": "0.1.0",
+  "vendor": "edna.io",
+  "url": "https://YOUR_PUBLIC_APP_URL/index.php",
+  "icon": "public/icon.png",
+  "redirect_uri": "https://YOUR_PUBLIC_APP_URL/oauth.php",
+  "scopes": [
+    "basic",
+    "crm",
+    "imopenlines",
+    "contact_center",
+    "placement",
+    "im"
+  ],
+  "install_script": "https://YOUR_PUBLIC_APP_URL/install.php",
+  "uninstall_script": "https://YOUR_PUBLIC_APP_URL/uninstall.php"
+}
