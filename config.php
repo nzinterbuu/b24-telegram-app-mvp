@@ -13,9 +13,9 @@ return [
   // If empty string, the token is not sent.
   'GREY_API_TOKEN_HEADER' => '',
 
-  // Bitrix24: optional fixed webhook mode (for local/testing).
-  // Leave empty for OAuth (recommended).
-  'B24_WEBHOOK_URL' => '',
+  // Bitrix24 OAuth (required). From Bitrix24 app registration (partner cabinet or local app settings).
+  'B24_CLIENT_ID' => 'local.6980df32aaa5b5.49435825',
+  'B24_CLIENT_SECRET' => 'RJKkrdZiDDt5XHzmGTJzcBj5sVpijS37iPFHfMEWeLHWTRCsam',
 
   // Enable debug logging to logs/app.log
   'DEBUG' => true,

@@ -23,6 +23,21 @@ try {
     'OPTIONS'   => ['width' => 980, 'height' => 900]
   ]);
 
+  // Save OAuth tokens for server-side use (inbound webhook, etc.)
+  $norm = b24_normalize_auth(is_array($auth) ? $auth : []);
+  $domain = $norm['domain'] ?? null;
+  $accessToken = $norm['access_token'] ?? null;
+  $refreshToken = $norm['refresh_token'] ?? null;
+  if ($domain && $accessToken && $refreshToken) {
+    $expiresIn = (int)($_REQUEST['AUTH_EXPIRES'] ?? ($data['AUTH_EXPIRES'] ?? 3600));
+    b24_save_oauth_tokens($domain, [
+      'access_token' => $accessToken,
+      'refresh_token' => $refreshToken,
+      'expires_at' => time() + $expiresIn,
+      'member_id' => $norm['member_id'] ?? $_REQUEST['member_id'] ?? $data['member_id'] ?? null,
+    ]);
+  }
+
   json_response(['ok'=>true,'deal_tab'=>$res1,'contact_center'=>$res2]);
 } catch (Throwable $e) {
   log_debug("install error", ['e'=>$e->getMessage()]);

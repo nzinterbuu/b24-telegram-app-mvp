@@ -44,6 +44,14 @@ function ensure_db(): PDO {
       phone TEXT,
       PRIMARY KEY (portal, user_id)
   )");
+  $pdo->exec("CREATE TABLE IF NOT EXISTS b24_oauth_tokens (
+      portal TEXT PRIMARY KEY,
+      access_token TEXT NOT NULL,
+      refresh_token TEXT NOT NULL,
+      expires_at INTEGER NOT NULL,
+      member_id TEXT,
+      updated_at INTEGER
+  )");
   return $pdo;
 }
 

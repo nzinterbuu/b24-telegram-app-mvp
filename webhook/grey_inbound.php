@@ -20,24 +20,37 @@ function normalize_phone(?string $phone): ?string {
 try {
   $payload = read_json();
 
-  // For inbound processing we recommend Bitrix24 webhook auth (server-to-server).
-  if (empty(cfg('B24_WEBHOOK_URL'))) {
-    throw new Exception("Set B24_WEBHOOK_URL in config.php to enable inbound processing.");
+  // Use stored OAuth tokens. Resolve portal: by tenant_id from payload, or first portal.
+  $tenantId = pick($payload, ['tenant_id','tenantId','tenant','connection_id']);
+  $portal = null;
+  if ($tenantId) {
+    $pdo = ensure_db();
+    $stmt = $pdo->prepare("SELECT portal FROM user_settings WHERE tenant_id=? LIMIT 1");
+    $stmt->execute([$tenantId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) $portal = $row['portal'];
   }
+  if (!$portal) {
+    $portal = b24_get_first_portal();
+  }
+  if (!$portal) {
+    throw new Exception("No Bitrix24 portal connected. Install the app in Bitrix24 first.");
+  }
+  $auth = ['portal' => $portal];
 
   $phone = normalize_phone((string)pick($payload, ['phone','from_phone','from','peer','sender','user_phone']));
   $text = (string)pick($payload, ['text','message','body','content','msg']);
   if (!$phone || $text === '') throw new Exception("Cannot parse inbound payload (need phone + text).");
 
   // Find or create contact by phone
-  $contactList = b24_call([], 'crm.contact.list', [
+  $contactList = b24_call($auth, 'crm.contact.list', [
     'filter' => ['PHONE' => $phone],
     'select' => ['ID','NAME']
   ]);
   $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
 
   if (!$contactId) {
-    $addC = b24_call([], 'crm.contact.add', [
+    $addC = b24_call($auth, 'crm.contact.add', [
       'fields' => [
         'NAME' => 'Telegram',
         'PHONE' => [['VALUE'=>$phone,'VALUE_TYPE'=>'WORK']]
@@ -47,7 +60,7 @@ try {
   }
 
   // If no deal exists for this contact -> create one (as requested)
-  $dealList = b24_call([], 'crm.deal.list', [
+  $dealList = b24_call($auth, 'crm.deal.list', [
     'filter' => ['CONTACT_ID' => $contactId],
     'select' => ['ID','ASSIGNED_BY_ID'],
     'order' => ['ID'=>'DESC'],
@@ -57,7 +70,7 @@ try {
   $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
 
   if (!$dealId) {
-    $addD = b24_call([], 'crm.deal.add', [
+    $addD = b24_call($auth, 'crm.deal.add', [
       'fields' => [
         'TITLE' => 'Telegram: '.$phone,
         'CONTACT_ID' => $contactId
@@ -66,7 +79,7 @@ try {
     $dealId = (int)($addD['result'] ?? 0);
   }
 
-  b24_call([], 'crm.timeline.comment.add', [
+  b24_call($auth, 'crm.timeline.comment.add', [
     'fields' => [
       'ENTITY_TYPE' => 'deal',
       'ENTITY_ID' => $dealId,
@@ -75,7 +88,7 @@ try {
   ]);
 
   if ($assigned) {
-    b24_call([], 'im.notify', [
+    b24_call($auth, 'im.notify', [
       'to' => $assigned,
       'message' => "Telegram message from {$phone}:\n{$text}\nDeal #{$dealId}"
     ]);

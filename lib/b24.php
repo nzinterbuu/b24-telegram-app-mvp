@@ -12,17 +12,116 @@ function b24_normalize_auth(array $auth): array {
   ];
 }
 
-function b24_call(array $auth, string $method, array $params = []): array {
-  if (!empty(cfg('B24_WEBHOOK_URL'))) {
-    $url = rtrim(cfg('B24_WEBHOOK_URL'), '/') . '/' . $method . '.json';
-  } else {
-    $auth = b24_normalize_auth($auth);
-    $domain = $auth['domain'] ?? null;
-    $token  = $auth['access_token'] ?? null;
-    if (!$domain || !$token) throw new Exception("Missing Bitrix24 auth. Please reopen app inside Bitrix24.");
-    $url = "https://{$domain}/rest/{$method}.json";
-    $params['auth'] = $token;
+function b24_get_oauth_tokens(string $portal): ?array {
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("SELECT access_token, refresh_token, expires_at, member_id FROM b24_oauth_tokens WHERE portal=?");
+  $stmt->execute([$portal]);
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  return $row ?: null;
+}
+
+function b24_save_oauth_tokens(string $portal, array $data): void {
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("INSERT INTO b24_oauth_tokens (portal, access_token, refresh_token, expires_at, member_id, updated_at)
+    VALUES (?,?,?,?,?,?)
+    ON CONFLICT(portal) DO UPDATE SET access_token=excluded.access_token, refresh_token=excluded.refresh_token, expires_at=excluded.expires_at, member_id=excluded.member_id, updated_at=excluded.updated_at");
+  $stmt->execute([
+    $portal,
+    $data['access_token'] ?? '',
+    $data['refresh_token'] ?? '',
+    (int)($data['expires_at'] ?? 0),
+    $data['member_id'] ?? null,
+    time(),
+  ]);
+}
+
+function b24_delete_oauth_tokens(string $portal): void {
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("DELETE FROM b24_oauth_tokens WHERE portal=?");
+  $stmt->execute([$portal]);
+}
+
+function b24_refresh_oauth_tokens(string $portal): array {
+  $row = b24_get_oauth_tokens($portal);
+  if (!$row || empty($row['refresh_token'])) {
+    throw new Exception("No refresh token for portal {$portal}");
   }
+  $clientId = cfg('B24_CLIENT_ID');
+  $clientSecret = cfg('B24_CLIENT_SECRET');
+  if (!$clientId || !$clientSecret) {
+    throw new Exception("B24_CLIENT_ID and B24_CLIENT_SECRET required for token refresh");
+  }
+  $tokenUrl = 'https://oauth.bitrix.info/oauth/token/?' . http_build_query([
+    'grant_type' => 'refresh_token',
+    'client_id' => $clientId,
+    'client_secret' => $clientSecret,
+    'refresh_token' => $row['refresh_token'],
+  ]);
+  $ch = curl_init($tokenUrl);
+  curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
+  $raw = curl_exec($ch);
+  curl_close($ch);
+  $data = json_decode($raw, true);
+  if (!is_array($data) || isset($data['error'])) {
+    throw new Exception($data['error_description'] ?? $data['error'] ?? 'Token refresh failed');
+  }
+  $expiresAt = time() + (int)($data['expires_in'] ?? 3600);
+  b24_save_oauth_tokens($portal, [
+    'access_token' => $data['access_token'] ?? '',
+    'refresh_token' => $data['refresh_token'] ?? $row['refresh_token'],
+    'expires_at' => $expiresAt,
+    'member_id' => $data['member_id'] ?? $row['member_id'],
+  ]);
+  return ['domain' => $portal, 'access_token' => $data['access_token'] ?? ''];
+}
+
+/** Get auth from stored tokens for a portal; refreshes if expired (1 min buffer). */
+function b24_get_stored_auth(string $portal): ?array {
+  $row = b24_get_oauth_tokens($portal);
+  if (!$row) return null;
+  $expiresAt = (int)($row['expires_at'] ?? 0);
+  if (time() >= $expiresAt - 60) {
+    try {
+      $refreshed = b24_refresh_oauth_tokens($portal);
+      return $refreshed;
+    } catch (Throwable $e) {
+      log_debug('token refresh failed', ['portal' => $portal, 'e' => $e->getMessage()]);
+      return null;
+    }
+  }
+  return ['domain' => $portal, 'access_token' => $row['access_token']];
+}
+
+/** Get first portal with stored tokens (for server-side calls like inbound webhook). */
+function b24_get_first_portal(): ?string {
+  $pdo = ensure_db();
+  $stmt = $pdo->query("SELECT portal FROM b24_oauth_tokens LIMIT 1");
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  return $row ? $row['portal'] : null;
+}
+
+function b24_call(array $auth, string $method, array $params = []): array {
+  $auth = b24_normalize_auth($auth);
+  $domain = $auth['domain'] ?? null;
+  $token  = $auth['access_token'] ?? null;
+
+  // If no token, try stored OAuth tokens by portal (for server-side e.g. inbound webhook)
+  if ((!$domain || !$token)) {
+    $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    if ($portal) {
+      $stored = b24_get_stored_auth((string)$portal);
+      if ($stored) {
+        $domain = $stored['domain'];
+        $token = $stored['access_token'];
+      }
+    }
+  }
+  if (!$domain || !$token) {
+    throw new Exception("Missing Bitrix24 auth. Please reopen app inside Bitrix24.");
+  }
+
+  $url = "https://{$domain}/rest/{$method}.json";
+  $params['auth'] = $token;
 
   $ch = curl_init($url);
   curl_setopt_array($ch, [
@@ -46,7 +145,8 @@ function b24_call(array $auth, string $method, array $params = []): array {
 }
 
 function portal_key(array $auth): string {
-  return $auth['domain'] ?? 'unknown';
+  $norm = b24_normalize_auth($auth);
+  return $norm['domain'] ?? $auth['portal'] ?? 'unknown';
 }
 
 function db_get_user_settings(array $auth, int $userId): array {
