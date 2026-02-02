@@ -15,7 +15,7 @@ return [
 
   // Bitrix24: optional fixed webhook mode (for local/testing).
   // Leave empty for OAuth (recommended).
-  'B24_WEBHOOK_URL' => '',
+  'B24_WEBHOOK_URL' => 'https://b24-u0gkt4.bitrix24.ru/rest/1/1bsik1fwzw9bloyz/',
 
   // Enable debug logging to logs/app.log
   'DEBUG' => true,
