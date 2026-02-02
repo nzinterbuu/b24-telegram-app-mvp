@@ -13,9 +13,9 @@ return [
   // If empty string, the token is not sent.
   'GREY_API_TOKEN_HEADER' => '',
 
-  // Bitrix24 OAuth (required). From Bitrix24 app registration (partner cabinet or local app settings).
-  'B24_CLIENT_ID' => '',
-  'B24_CLIENT_SECRET' => '',
+  // Bitrix24 OAuth (required). From Bitrix24 app registration. Prefer env vars (e.g. Render).
+  'B24_CLIENT_ID' => getenv('B24_CLIENT_ID') ?: '',
+  'B24_CLIENT_SECRET' => getenv('B24_CLIENT_SECRET') ?: '',
 
   // Enable debug logging to logs/app.log
   'DEBUG' => true,
