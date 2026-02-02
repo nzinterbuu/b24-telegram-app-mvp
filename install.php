@@ -127,30 +127,42 @@ h2{margin:0 0 16px;font-size:18px;}
 (function(){
   var msg = document.getElementById("msg");
   function setMsg(t, err){ msg.textContent = t; msg.className = err ? "err" : ""; }
+  if (typeof BX24 === "undefined") {
+    setMsg("BX24 SDK not loaded. Check that the install page opens inside Bitrix24.", true);
+    return;
+  }
   BX24.init(function(){
-    BX24.getAuth(function(auth){
-      if (!auth || !auth.access_token || !auth.domain) {
-        setMsg("Could not get Bitrix24 auth. Please ensure you are logged in as administrator.", true);
-        return;
+    var auth = BX24.getAuth();
+    if (!auth || !auth.access_token || !auth.domain) {
+      var params = new URLSearchParams(window.location.search);
+      var domain = params.get("domain") || params.get("DOMAIN");
+      var token = params.get("auth") || params.get("AUTH_ID");
+      if (domain && token) {
+        auth = {domain: domain, access_token: token, refresh_token: params.get("REFRESH_ID") || ""};
       }
-      setMsg("Registering placements...");
-      fetch("' . htmlspecialchars($public) . '/install.php", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({auth: auth, expires_in: (typeof auth.expires_in === "number" ? auth.expires_in : 3600)})
-      })
-      .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, json: j}; }); })
-      .then(function(o){
-        if (o.ok && o.json.ok) {
-          setMsg("Success! Finalizing...");
-          BX24.installFinish();
-        } else {
-          setMsg("Error: " + (o.json.error || "Unknown"), true);
-        }
-      })
-      .catch(function(e){
-        setMsg("Error: " + (e.message || String(e)), true);
-      });
+    }
+    if (!auth || !auth.access_token || !auth.domain) {
+      setMsg("Could not get Bitrix24 auth. Ensure you are logged in as administrator.", true);
+      return;
+    }
+    setMsg("Registering placements...");
+    var expiresIn = (typeof auth.expires_in === "number" ? auth.expires_in : 3600);
+    fetch("' . htmlspecialchars($public) . '/install.php", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({auth: auth, expires_in: expiresIn})
+    })
+    .then(function(r){ return r.json().then(function(j){ return {ok: r.ok, json: j}; }); })
+    .then(function(o){
+      if (o.ok && o.json.ok) {
+        setMsg("Success! Finalizing...");
+        BX24.installFinish();
+      } else {
+        setMsg("Error: " + (o.json.error || "Unknown"), true);
+      }
+    })
+    .catch(function(e){
+      setMsg("Error: " + (e.message || String(e)), true);
     });
   });
 })();
