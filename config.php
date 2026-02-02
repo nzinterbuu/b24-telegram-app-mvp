@@ -6,7 +6,7 @@ return [
   'PUBLIC_URL' => 'https://b24-telegram-app-mvp.onrender.com',
 
   // Grey TG API base URL (no trailing slash), e.g. https://api.yourdomain.com
-  'GREY_API_BASE' => 'https://YOUR_GREY_API_BASE',
+  'GREY_API_BASE' => 'https://grey-tg.onrender.com',
 
   // If Grey API requires an API token header, set header name here, e.g. 'Authorization'
   // and in code we will send "Header: Bearer <token>" if token starts with "Bearer ".
