@@ -3,7 +3,7 @@
 
 return [
   // Public base URL of this app (no trailing slash)
-  'PUBLIC_URL' => 'https://https://advancement-honor-willing-attempts.trycloudflare.com/',
+  'PUBLIC_URL' => 'https://b24-telegram-app-mvp.onrender.com',
 
   // Grey TG API base URL (no trailing slash), e.g. https://api.yourdomain.com
   'GREY_API_BASE' => 'https://YOUR_GREY_API_BASE',
