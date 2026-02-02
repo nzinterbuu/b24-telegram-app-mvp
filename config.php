@@ -11,7 +11,7 @@ return [
   // If Grey API requires an API token header, set header name here, e.g. 'Authorization'
   // and in code we will send "Header: Bearer <token>" if token starts with "Bearer ".
   // If empty string, the token is not sent.
-  'GREY_API_TOKEN_HEADER' => 'Authorization',
+  'GREY_API_TOKEN_HEADER' => '',
 
   // Bitrix24: optional fixed webhook mode (for local/testing).
   // Leave empty for OAuth (recommended).
