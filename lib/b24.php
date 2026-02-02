@@ -2,10 +2,21 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 
+/** Normalize auth from Bitrix24 formats: iframe POST uses DOMAIN/AUTH_ID, OAuth event uses domain/access_token */
+function b24_normalize_auth(array $auth): array {
+  return [
+    'domain'       => $auth['domain'] ?? $auth['DOMAIN'] ?? null,
+    'access_token' => $auth['access_token'] ?? $auth['AUTH_ID'] ?? null,
+    'refresh_token' => $auth['refresh_token'] ?? $auth['REFRESH_ID'] ?? null,
+    'member_id'    => $auth['member_id'] ?? null,
+  ];
+}
+
 function b24_call(array $auth, string $method, array $params = []): array {
   if (!empty(cfg('B24_WEBHOOK_URL'))) {
     $url = rtrim(cfg('B24_WEBHOOK_URL'), '/') . '/' . $method . '.json';
   } else {
+    $auth = b24_normalize_auth($auth);
     $domain = $auth['domain'] ?? null;
     $token  = $auth['access_token'] ?? null;
     if (!$domain || !$token) throw new Exception("Missing Bitrix24 auth. Please reopen app inside Bitrix24.");
