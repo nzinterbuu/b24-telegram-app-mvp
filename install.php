@@ -9,6 +9,11 @@ $json = read_json();
 if (!empty($json['auth']) && is_array($json['auth'])) {
   $auth = $json['auth'];
   try {
+    $adminCheck = b24_call($auth, 'user.admin', []);
+    if (empty($adminCheck['result'])) {
+      json_response(['ok' => false, 'error' => 'Only a Bitrix24 administrator can install this app. Please log in as an administrator (or ask your portal admin to install the app), then try again.'], 403);
+      exit;
+    }
     $res1 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
       'HANDLER'   => $public . '/deal_tab.php',
@@ -54,6 +59,10 @@ $triedRequestAuth = false;
 if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset($auth['access_token']) || isset($auth['AUTH_ID']))) {
   $triedRequestAuth = true;
   try {
+    $adminCheck = b24_call($auth, 'user.admin', []);
+    if (empty($adminCheck['result'])) {
+      throw new Exception('Only a Bitrix24 administrator can install this app. Please log in as an administrator.');
+    }
     $res1 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
       'HANDLER'   => $public . '/deal_tab.php',
@@ -112,6 +121,7 @@ function install_wizard_html(string $public, bool $showRetryNote): string {
 body{font-family:system-ui;max-width:480px;margin:40px auto;padding:20px;background:#f5f5f5;}
 .card{background:#fff;padding:24px;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,.1);}
 h2{margin:0 0 16px;font-size:18px;}
+.reqs{font-size:13px;color:#333;margin-bottom:16px;padding:10px;background:#f8f9fa;border-radius:4px;}
 .note{color:#856404;background:#fff3cd;padding:8px 12px;border-radius:4px;font-size:14px;margin-bottom:16px;}
 #msg{color:#0c5460;background:#d1ecf1;padding:8px 12px;border-radius:4px;font-size:14px;margin-top:12px;}
 #msg.err{color:#721c24;background:#f8d7da;}
@@ -119,6 +129,7 @@ h2{margin:0 0 16px;font-size:18px;}
 </head><body>
 <div class="card">
 <h2>Install GreyTG for Bitrix24</h2>
+<p class="reqs"><strong>Required:</strong> You must be a <strong>Bitrix24 administrator</strong>. When adding the app, grant these permissions: <strong>basic</strong>, <strong>crm</strong>, <strong>imopenlines</strong>, <strong>contact_center</strong>, <strong>placement</strong>, <strong>im</strong>.</p>
 ' . $retryNote . '
 <p>Completing installation...</p>
 <div id="msg"></div>

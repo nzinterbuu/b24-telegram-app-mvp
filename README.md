@@ -29,10 +29,21 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
    - Set redirect URL: `https://YOUR_PUBLIC_APP_URL/oauth.php`
    - Scopes: basic, crm, imopenlines, contact_center, placement, im
    - Copy `client_id` and `client_secret` to config.php as B24_CLIENT_ID and B24_CLIENT_SECRET
-4) Install the app in your Bitrix24 portal (OAuth tokens are saved during install).
+4) **Install the app** in your Bitrix24 portal. **You must be a Bitrix24 administrator** to install (the installer registers placements, which requires admin rights). When Bitrix24 asks for permissions, grant all requested scopes. OAuth tokens are saved during install.
 5) Open the app from left menu, go to **Settings**, enter:
    - Tenant ID (UUID) and API token (if your Grey API requires it)
    - Phone number, start OTP and verify
+
+## Rights required when installing in Bitrix24
+
+- **User role:** You must install the app while logged in as a **Bitrix24 administrator**. Only admins can register placements (deal tab, contact center). If you see "The request requires higher privileges than provided by the access token", log in as an admin and install again.
+- **Permissions (scopes)** to grant when adding the app:
+  - **basic** — current user info
+  - **crm** — deals, contacts, timeline
+  - **imopenlines** — open lines (for future use)
+  - **contact_center** — contact center placement
+  - **placement** — register deal tab and contact center widgets
+  - **im** — send IM notifications
 
 ## Endpoints
 - /install.php (registers placements)
