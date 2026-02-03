@@ -11,8 +11,9 @@ try {
   $s = db_get_user_settings($auth, $userId);
   if (empty($s['tenant_id'])) throw new Exception("Tenant ID is not set. Save settings first.");
 
-  $body = [];
-  $res = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/auth/resend', 'POST', $body);
+  // Grey API has no /auth/resend; request new code via /auth/start (same as Start OTP)
+  $body = ['phone' => ($s['phone'] ?? '')];
+  $res = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/auth/start', 'POST', $body);
   json_response($res);
 } catch (Throwable $e) {
   json_response(['error'=>$e->getMessage(),'message'=>$e->getMessage()], 400);

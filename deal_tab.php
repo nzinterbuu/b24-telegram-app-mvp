@@ -26,15 +26,25 @@ require_once __DIR__ . '/lib/bootstrap.php';
 </div>
 
 <script>
-async function api(path, body={}) {
-  const auth = await new Promise(resolve => BX24.getAuth(resolve));
-  const res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({auth, ...body})});
-  const json = await res.json().catch(()=> ({}));
+function getAuth() {
+  var auth = (typeof BX24 !== 'undefined' && BX24.getAuth) ? BX24.getAuth() : null;
+  if (auth && auth.access_token && auth.domain) return Promise.resolve(auth);
+  return new Promise(function(resolve) {
+    if (typeof BX24 !== 'undefined' && BX24.getAuth) BX24.getAuth(resolve);
+    else resolve(null);
+  });
+}
+async function api(path, body) {
+  body = body || {};
+  var auth = await getAuth();
+  if (!auth || !auth.access_token) throw new Error('Bitrix24 auth not available.');
+  var res = await fetch(path, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({auth: auth, ...body})});
+  var json = await res.json().catch(function(){ return {}; });
   if (!res.ok) throw new Error(json.message || json.error || ('HTTP '+res.status));
   return json;
 }
 
-let dealId = null;
+var dealId = null;
 
 BX24.init(function() {
   BX24.resizeWindow(800, 600);
@@ -45,9 +55,14 @@ BX24.init(function() {
 });
 
 async function send(){
-  const text = document.getElementById('deal_text').value;
-  const data = await api('ajax/send_from_deal.php', {deal_id: String(dealId||''), text});
-  document.getElementById('out').textContent = JSON.stringify(data, null, 2);
+  var out = document.getElementById('out');
+  try {
+    var text = document.getElementById('deal_text').value;
+    var data = await api('ajax/send_from_deal.php', {deal_id: String(dealId||''), text: text});
+    out.textContent = JSON.stringify(data, null, 2);
+  } catch (e) {
+    out.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+  }
 }
 </script>
 </body>

@@ -31,7 +31,12 @@ function grey_call(string $tenantId, ?string $apiToken, string $path, string $me
   if ($raw === false) throw new Exception("Grey API cURL error: ".$err);
   $data = json_decode($raw, true);
   if ($code >= 400) {
-    $msg = is_array($data) ? ($data['message'] ?? $data['error'] ?? 'Grey API error') : 'Grey API error';
+    $msg = 'Grey API error';
+    if (is_array($data)) {
+      $d = $data['detail'] ?? $data['message'] ?? $data['error'] ?? null;
+      if (is_string($d)) $msg = $d;
+      elseif (is_array($d)) $msg = $d['msg'] ?? json_encode($d);
+    }
     throw new Exception($msg);
   }
   return is_array($data) ? $data : ['raw'=>$raw];
