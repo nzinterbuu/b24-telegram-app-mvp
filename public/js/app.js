@@ -24,12 +24,100 @@ async function api(path, body = {}) {
 function el(id){ return document.getElementById(id); }
 function setText(id, txt){ el(id).textContent = txt; }
 
+function statusLabel(s) {
+  if (!s) return '—';
+  if (s.error) return s.error;
+  if (s.authorized) return 'Authorized' + (s.phone ? ' (' + s.phone + ')' : '');
+  return 'Not authorized';
+}
+
+async function loadTenants(){
+  try {
+    var data = await api('ajax/get_tenants.php', {});
+    var tenants = data.tenants || [];
+    var sel = el('tenant_select');
+    var currentId = el('tenant_id').value;
+    sel.innerHTML = '<option value="">— Select tenant —</option>';
+    tenants.forEach(function(t) {
+      var opt = document.createElement('option');
+      opt.value = t.id || '';
+      opt.textContent = (t.name || t.id || '—') + ' (' + (t.id ? t.id.substring(0, 8) + '…' : '') + ')';
+      if (t.id === currentId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    var wrap = el('tenants_table_wrap');
+    if (tenants.length === 0) {
+      wrap.innerHTML = '<p class="small">No tenants. Create one above.</p>';
+    } else {
+      var tbl = '<table><thead><tr><th>Name</th><th>ID</th><th>Status</th></tr></thead><tbody>';
+      tenants.forEach(function(t) {
+        var st = statusLabel(t.status);
+        var cls = t.status && t.status.authorized ? 'status-ok' : (t.status && t.status.error ? 'status-err' : '');
+        tbl += '<tr><td>' + (t.name || '—') + '</td><td><code>' + (t.id || '—') + '</code></td><td class="' + cls + '">' + st + '</td></tr>';
+      });
+      tbl += '</tbody></table>';
+      wrap.innerHTML = tbl;
+    }
+  } catch (e) {
+    el('tenants_table_wrap').innerHTML = '<p class="status-err">Error: ' + (e && e.message ? e.message : String(e)) + '</p>';
+  }
+}
+
+function onTenantSelectChange(){
+  var sel = el('tenant_select');
+  el('tenant_id').value = sel.value || '';
+  if (sel.value) App.saveSettings();
+}
+
+function showCreateTenant(){
+  el('create_tenant_form').style.display = 'block';
+  el('new_tenant_name').value = '';
+  el('new_tenant_callback').value = '';
+}
+function hideCreateTenant(){
+  el('create_tenant_form').style.display = 'none';
+}
+
+async function createTenant(){
+  var name = el('new_tenant_name').value.trim();
+  if (!name) {
+    setText('status_out', 'Error: Enter a tenant name.');
+    return;
+  }
+  try {
+    var payload = { name: name };
+    var cb = el('new_tenant_callback').value.trim();
+    if (cb) payload.callback_url = cb;
+    var data = await api('ajax/create_tenant.php', payload);
+    hideCreateTenant();
+    var t = data.tenant || data;
+    el('tenant_id').value = t.id || '';
+    await loadTenants();
+    var sel = el('tenant_select');
+    sel.value = t.id || '';
+    setText('status_out', JSON.stringify(data, null, 2));
+  } catch (e) {
+    setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
 async function loadSettings(){
   try {
     var data = await api('ajax/get_settings.php', {});
     el('tenant_id').value = data.tenant_id || '';
     el('api_token').value = data.api_token || '';
     el('phone').value = data.phone || '';
+    if (el('tenant_select')) {
+      var sel = el('tenant_select');
+      if (sel.options.length) {
+        var found = false;
+        for (var i = 0; i < sel.options.length; i++) {
+          if (sel.options[i].value === data.tenant_id) { sel.selectedIndex = i; found = true; break; }
+        }
+        if (!found && data.tenant_id) sel.innerHTML = '<option value="">— Select tenant —</option><option value="' + data.tenant_id + '" selected>Saved: ' + data.tenant_id + '</option>' + (sel.options.length > 2 ? '' : '');
+      }
+    }
     setText('status_out', JSON.stringify(data.status || {}, null, 2));
   } catch (e) {
     setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
@@ -111,5 +199,6 @@ async function sendFromDeal(){
 }
 
 window.App = {
-  loadSettings, saveSettings, refreshStatus, startOtp, resendOtp, verifyOtp, logout, sendFromDeal
+  loadSettings, saveSettings, refreshStatus, startOtp, resendOtp, verifyOtp, logout, sendFromDeal,
+  loadTenants, onTenantSelectChange, showCreateTenant, hideCreateTenant, createTenant
 };

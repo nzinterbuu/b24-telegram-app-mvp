@@ -11,14 +11,42 @@ require_once __DIR__ . '/lib/bootstrap.php';
 <body>
 <div class="container">
   <div class="card">
-    <h2>Settings: connect Telegram account</h2>
+    <h2>Tenants</h2>
+    <p class="small">Select a tenant for messaging, or create a new one (any name).</p>
     <div class="row">
       <div>
-        <label>Grey tenant_id (UUID) — «номер подключения»</label>
-        <input id="tenant_id" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" />
+        <label>Selected tenant</label>
+        <select id="tenant_select" onchange="App.onTenantSelectChange()">
+          <option value="">— Select tenant —</option>
+        </select>
       </div>
       <div>
-        <label>Grey API token — «токен» (if required)</label>
+        <button type="button" class="secondary" onclick="App.loadTenants()">Refresh list</button>
+      </div>
+    </div>
+    <div id="tenants_table_wrap" class="tenants-table-wrap"></div>
+    <div style="margin-top:12px;">
+      <button type="button" onclick="App.showCreateTenant()">Create new tenant</button>
+    </div>
+    <div id="create_tenant_form" class="create-tenant-form" style="display:none;">
+      <hr/>
+      <label>Name (any name)</label>
+      <input id="new_tenant_name" placeholder="e.g. Sales team" />
+      <label>Callback URL (optional)</label>
+      <input id="new_tenant_callback" placeholder="https://..." />
+      <div style="margin-top:8px;">
+        <button type="button" onclick="App.createTenant()">Create</button>
+        <button type="button" class="secondary" onclick="App.hideCreateTenant()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Settings: connect Telegram account</h2>
+    <input type="hidden" id="tenant_id" />
+    <div class="row">
+      <div>
+        <label>Grey API token — «токен» (if required by your Grey API)</label>
         <input id="api_token" placeholder="Bearer ..." />
       </div>
       <div>
@@ -82,7 +110,9 @@ require_once __DIR__ . '/lib/bootstrap.php';
 <script>
 BX24.init(function() {
   BX24.resizeWindow(980, 900);
-  App.loadSettings().catch(err => document.getElementById('status_out').textContent = String(err));
+  App.loadTenants()
+    .then(function() { return App.loadSettings(); })
+    .catch(function(err) { document.getElementById('status_out').textContent = String(err); });
 });
 </script>
 </body>

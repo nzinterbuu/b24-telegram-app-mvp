@@ -13,6 +13,9 @@ return [
   // If empty string, the token is not sent.
   'GREY_API_TOKEN_HEADER' => '',
 
+  // Optional: server token for list/create tenants (used with GREY_API_TOKEN_HEADER).
+  'GREY_API_SERVER_TOKEN' => getenv('GREY_API_SERVER_TOKEN') ?: '',
+
   // Bitrix24 OAuth (required). From Bitrix24 app registration. Prefer env vars (e.g. Render).
   'B24_CLIENT_ID' => getenv('B24_CLIENT_ID') ?: '',
   'B24_CLIENT_SECRET' => getenv('B24_CLIENT_SECRET') ?: '',

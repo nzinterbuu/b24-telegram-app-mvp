@@ -5,7 +5,8 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
 
 ## What it implements
 - App UI (Left menu page) with:
-  - Connect (save Grey `tenant_id` + API token) and check auth status
+  - **Tenants:** list existing tenants and their status; pick the tenant to use for messaging; create new tenant (any name, not just UUID)
+  - Connect (save Grey API token if required) and check auth status
   - Start OTP / Verify OTP / Resend / Logout (Telegram session)
 - CRM Deal detail tab (`CRM_DEAL_DETAIL_TAB`): send a message to the deal's client phone (from Contact/Company)
 - Contact Center tile (`CONTACT_CENTER`): opens the same chat UI (MVP)
@@ -24,15 +25,13 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
 ## Quick start (local dev)
 1) Put this folder on a PHP 8.1+ host with HTTPS (or use ngrok).
 2) Copy `config.example.php` -> `config.php` and edit.
-3) Register the app in Bitrix24 **Developer resources** (or Partner cabinet for marketplace):
+3) Register the app in Bitrix24 **Developer resources** (or Partner cabinet for marketplace). Optionally set `GREY_API_SERVER_TOKEN` and `GREY_API_TOKEN_HEADER` in config if your Grey API requires auth for listing/creating tenants.
    - Set the application URL: `https://YOUR_PUBLIC_APP_URL/index.php`
    - Set redirect URL: `https://YOUR_PUBLIC_APP_URL/oauth.php`
    - Scopes: basic, crm, imopenlines, contact_center, placement, im
    - Copy `client_id` and `client_secret` to config.php as B24_CLIENT_ID and B24_CLIENT_SECRET
 4) **Install the app** in your Bitrix24 portal. **You must be a Bitrix24 administrator** to install (the installer registers placements, which requires admin rights). When Bitrix24 asks for permissions, grant all requested scopes. OAuth tokens are saved during install.
-5) Open the app from left menu, go to **Settings**, enter:
-   - Tenant ID (UUID) and API token (if your Grey API requires it)
-   - Phone number, start OTP and verify
+5) Open the app from left menu: select a tenant (or create one with any name), then enter API token if required and phone; start OTP and verify
 
 ## Rights required when installing in Bitrix24
 
