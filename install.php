@@ -4,6 +4,19 @@ require_once __DIR__ . '/lib/b24.php';
 
 $public = rtrim(cfg('PUBLIC_URL'), '/');
 
+function install_unbind_placements(array $auth, string $public): void {
+  foreach (
+    [['PLACEMENT' => 'CRM_DEAL_DETAIL_TAB', 'HANDLER' => $public . '/deal_tab.php'], ['PLACEMENT' => 'CONTACT_CENTER', 'HANDLER' => $public . '/index.php']]
+    as $p
+  ) {
+    try {
+      b24_call($auth, 'placement.unbind', $p);
+    } catch (Throwable $e) {
+      // Ignore if nothing was bound
+    }
+  }
+}
+
 // Handle AJAX from install wizard: JS got auth via BX24.getAuth() and POSTs it here
 $json = read_json();
 if (!empty($json['auth']) && is_array($json['auth'])) {
@@ -14,6 +27,7 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
       json_response(['ok' => false, 'error' => 'Only a Bitrix24 administrator can install this app. Please log in as an administrator (or ask your portal admin to install the app), then try again.'], 403);
       exit;
     }
+    install_unbind_placements($auth, $public);
     $res1 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
       'HANDLER'   => $public . '/deal_tab.php',
@@ -63,6 +77,7 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
     if (empty($adminCheck['result'])) {
       throw new Exception('Only a Bitrix24 administrator can install this app. Please log in as an administrator.');
     }
+    install_unbind_placements($auth, $public);
     $res1 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
       'HANDLER'   => $public . '/deal_tab.php',
