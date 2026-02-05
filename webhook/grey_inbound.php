@@ -17,7 +17,7 @@ function normalize_phone(?string $phone): ?string {
   return $p;
 }
 
-/** Extract phone and text from payload (top-level or nested in message/event). */
+/** Extract phone and text from payload (top-level or nested in message/event). Grey may send: tenant_id, event, message (with message containing from/peer and text). */
 function parse_inbound_payload(array $payload): array {
   $phone = null;
   $text = '';
@@ -25,12 +25,23 @@ function parse_inbound_payload(array $payload): array {
     $payload,
     $payload['message'] ?? [],
     $payload['event'] ?? [],
+    $payload['event']['message'] ?? [],
     $payload['data'] ?? [],
   ];
   foreach ($try as $a) {
     if (!is_array($a)) continue;
-    $p = normalize_phone((string)pick($a, ['phone','from_phone','from','peer','sender','user_phone','sender_phone','contact_phone']));
-    $t = trim((string)pick($a, ['text','message','body','content','msg','message_text']));
+    $p = normalize_phone((string)pick($a, ['phone','from_phone','from','peer','sender','user_phone','sender_phone','contact_phone','peer_id','sender_id']));
+    if (!$p && isset($a['from']) && is_array($a['from'])) {
+      $p = normalize_phone((string)pick($a['from'], ['phone','phone_number','number','id','username']));
+    }
+    if (!$p && isset($a['from']) && is_string($a['from'])) {
+      $p = normalize_phone($a['from']);
+    }
+    if (!$p && isset($a['peer_id'])) {
+      $p = normalize_phone((string)$a['peer_id']);
+    }
+    $tRaw = pick($a, ['text','message','body','content','msg','message_text','data']);
+    $t = is_string($tRaw) ? trim($tRaw) : '';
     if ($p) $phone = $phone ?? $p;
     if ($t !== '') $text = $text !== '' ? $text : $t;
   }
