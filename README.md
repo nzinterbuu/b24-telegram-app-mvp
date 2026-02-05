@@ -9,6 +9,7 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
   - **Connect / disconnect Telegram:** save API token, phone; Start OTP, Verify, Resend; Disconnect (logout)
 - **Deal tab** (`CRM_DEAL_DETAIL_TAB` — inside a Bitrix24 Deal): send a Telegram message to the deal’s contact phone
 - **Contact Center** (`CONTACT_CENTER` — inside Bitrix24 Contact Center): chat with customer (send message to phone or @username); inbound messages go to CRM timeline and notifications
+- **Replying to incoming messages:** When a customer sends a Telegram message, you get a timeline comment on the deal and (if assigned) an IM notification. To answer: **either** open that **Deal** → **Telegram chat** tab, type your reply and Send (no need to enter the phone), **or** open **Contact Center**, enter the customer’s phone or @username in **To**, type the message and Send.
 - **Inbound webhook** (Grey tenant `callback_url`):
   - Creates/updates CRM Contact by phone
   - Creates a new Deal if no existing Deal found for that Contact (MVP rule)

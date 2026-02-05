@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/lib/bootstrap.php';
+$peerFromUrl = isset($_REQUEST['peer']) ? trim((string)$_REQUEST['peer']) : '';
 ?><!doctype html>
 <html>
 <head>
@@ -13,10 +14,17 @@ require_once __DIR__ . '/lib/bootstrap.php';
   <div class="card">
     <h2>Chat with customer (Telegram)</h2>
     <p class="small">Send and receive messages via Telegram. Select a tenant and connect your Telegram account in the <strong>app</strong> (left menu) first.</p>
+    <div class="card" style="margin-bottom:12px; padding:10px; background:#f8f9fa; border-radius:6px;">
+      <strong>How to answer an incoming message</strong>
+      <ul class="small" style="margin:8px 0 0 0; padding-left:18px;">
+        <li><strong>From the Deal:</strong> Open the deal (from the notification or CRM), go to the <strong>Telegram chat</strong> tab, type your reply and click Send. The message goes to the contact’s phone linked to that deal.</li>
+        <li><strong>From here:</strong> Enter the customer’s phone (e.g. <code>+79001234567</code>) or Telegram <code>@username</code> in <strong>To</strong>, type your message and click Send. Use the same phone/username that appears in the inbound notification or timeline.</li>
+      </ul>
+    </div>
     <div class="row">
       <div>
         <label>To (phone E.164 or @username)</label>
-        <input id="peer" placeholder="+79001234567 or @username" />
+        <input id="peer" placeholder="+79001234567 or @username" value="<?= htmlspecialchars($peerFromUrl) ?>" />
       </div>
     </div>
     <label>Message</label>
