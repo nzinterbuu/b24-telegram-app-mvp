@@ -117,7 +117,11 @@ function b24_call(array $auth, string $method, array $params = []): array {
     }
   }
   if (!$domain || !$token) {
-    throw new Exception("Missing Bitrix24 auth. Please reopen app inside Bitrix24.");
+    $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    if ($portal) {
+      throw new Exception("No Bitrix24 tokens for this portal. Re-install the app from Bitrix24 (open app from left menu and run installer) to save OAuth tokens.");
+    }
+    throw new Exception("Missing Bitrix24 auth. Please open the app from inside Bitrix24.");
   }
 
   $url = "https://{$domain}/rest/{$method}.json";

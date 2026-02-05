@@ -200,5 +200,10 @@ try {
       message_log_insert('in', $portalForLog, null, isset($phone) ? $phone : '', isset($text) ? $text : '', null, 'webhook', $e->getMessage());
     } catch (Throwable $t) { /* ignore */ }
   }
-  json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], 400);
+  $isAuthError = (strpos($e->getMessage(), 'Bitrix24') !== false && (strpos($e->getMessage(), 'token') !== false || strpos($e->getMessage(), 'auth') !== false));
+  $code = $isAuthError ? 200 : 400;
+  if ($isAuthError) {
+    header('X-Inbound-Error: auth');
+  }
+  json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], $code);
 }

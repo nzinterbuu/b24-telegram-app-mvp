@@ -79,7 +79,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
 
   <div class="card">
     <h2>Message history (inbound & outbound)</h2>
-    <p class="small">Recent Telegram messages received by the webhook and sent from the app. Use this to verify that inbound messages are reaching the app.</p>
+    <p class="small">Recent Telegram messages received by the webhook and sent from the app. Use this to verify that inbound messages are reaching the app. If inbound rows show “No Bitrix24 tokens” or “Missing Bitrix24 auth”, re-install the app from Bitrix24 (open the app and run the installer again) so OAuth tokens are saved for the webhook.</p>
     <div style="margin-bottom:8px;">
       <button type="button" class="secondary" onclick="App.loadMessageLog()">Refresh</button>
     </div>
