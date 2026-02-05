@@ -1,6 +1,22 @@
 <?php
 require_once __DIR__ . '/lib/bootstrap.php';
+
+function deal_tab_placement_options_id(): ?int {
+  $raw = $_GET['PLACEMENT_OPTIONS'] ?? $_GET['placement_options'] ?? null;
+  if ($raw === null || $raw === '') return null;
+  $raw = (string)$raw;
+  $data = json_decode($raw, true);
+  if (!is_array($data)) {
+    $decoded = base64_decode(str_replace(['-', '_'], ['+', '/'], $raw), true);
+    $data = is_string($decoded) ? json_decode($decoded, true) : null;
+  }
+  if (!is_array($data)) return null;
+  $id = $data['ID'] ?? $data['id'] ?? $data['ENTITY_ID'] ?? $data['entityId'] ?? $data['dealId'] ?? $data['OWNER_ID'] ?? null;
+  return $id !== null ? (int)$id : null;
+}
+
 $dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) ? (int)$_GET['id'] : (isset($_REQUEST['ENTITY_ID']) ? (int)$_REQUEST['ENTITY_ID'] : null));
+if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_placement_options_id();
 ?><!doctype html>
 <html>
 <head>
@@ -16,10 +32,14 @@ $dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) 
     <div class="small">Send a Telegram message to the client phone linked to this deal.</div>
     <hr/>
     <div id="ctx" class="small"></div>
+    <div id="phone_row" class="small" style="display:none; margin-top:8px;">
+      <label>Phone (E.164, e.g. +79001234567)</label>
+      <input type="text" id="deal_phone" placeholder="+79001234567" style="width:100%; max-width:240px;" />
+    </div>
     <label>Message</label>
     <textarea id="deal_text" rows="4" placeholder="Write message..."></textarea>
     <div style="margin-top:10px;">
-      <button id="deal_send_btn" onclick="send()" disabled>Send</button>
+      <button id="deal_send_btn" onclick="send()">Send</button>
     </div>
     <hr/>
     <pre id="out">{}</pre>
@@ -55,6 +75,24 @@ function getDealIdFromUrl() {
   } catch (e) { return null; }
 }
 
+function getDealIdFromPlacementOptions() {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var raw = params.get('PLACEMENT_OPTIONS') || params.get('placement_options');
+    if (!raw) return null;
+    var data = null;
+    try { data = JSON.parse(raw); } catch (e1) {}
+    if (!data) {
+      try {
+        var decoded = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
+        data = JSON.parse(decoded);
+      } catch (e2) { return null; }
+    }
+    var id = data && (data.ID !== undefined ? data.ID : data.id !== undefined ? data.id : data.ENTITY_ID !== undefined ? data.ENTITY_ID : data.entityId !== undefined ? data.entityId : data.dealId !== undefined ? data.dealId : data.OWNER_ID);
+    return id != null ? (parseInt(id, 10) || null) : null;
+  } catch (e) { return null; }
+}
+
 function getDealIdFromReferrer() {
   try {
     var r = document.referrer || '';
@@ -67,6 +105,7 @@ function getDealIdFromReferrer() {
 function refreshDealId() {
   if (dealId) return dealId;
   dealId = getDealIdFromUrl();
+  if (!dealId) dealId = getDealIdFromPlacementOptions();
   if (!dealId) dealId = getDealIdFromReferrer();
   return dealId;
 }
@@ -74,13 +113,13 @@ function refreshDealId() {
 function updateCtx() {
   refreshDealId();
   var ctx = document.getElementById('ctx');
-  var btn = document.getElementById('deal_send_btn');
+  var phoneRow = document.getElementById('phone_row');
   if (dealId) {
     ctx.textContent = 'Deal: ' + dealId;
-    if (btn) btn.disabled = false;
+    if (phoneRow) phoneRow.style.display = 'none';
   } else {
-    ctx.textContent = 'Deal ID not found. Open this tab from a Deal card.';
-    if (btn) btn.disabled = true;
+    ctx.textContent = 'Deal ID not detected. Enter recipient phone below or open this tab from a Deal card.';
+    if (phoneRow) phoneRow.style.display = 'block';
   }
 }
 
@@ -95,6 +134,7 @@ BX24.init(function() {
       dealId = raw ? (parseInt(raw, 10) || null) : null;
     }
     if (!dealId) dealId = getDealIdFromUrl();
+    if (!dealId) dealId = getDealIdFromPlacementOptions();
     if (!dealId) dealId = getDealIdFromReferrer();
     updateCtx();
   });
@@ -105,12 +145,23 @@ async function send(){
   var out = document.getElementById('out');
   try {
     refreshDealId();
-    if (!dealId) {
-      out.textContent = 'Error: Deal ID not found. Open this tab from a Deal card and try again.';
+    var text = document.getElementById('deal_text').value.trim();
+    if (!text) {
+      out.textContent = 'Error: Message text is empty.';
       return;
     }
-    var text = document.getElementById('deal_text').value;
-    var data = await api('ajax/send_from_deal.php', { deal_id: dealId, text: text });
+    var body = { text: text };
+    if (dealId) {
+      body.deal_id = dealId;
+    } else {
+      var phone = (document.getElementById('deal_phone') || {}).value.trim();
+      if (!phone) {
+        out.textContent = 'Error: Enter recipient phone (or open this tab from a Deal card).';
+        return;
+      }
+      body.phone = phone;
+    }
+    var data = await api('ajax/send_from_deal.php', body);
     out.textContent = JSON.stringify(data, null, 2);
   } catch (e) {
     out.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
