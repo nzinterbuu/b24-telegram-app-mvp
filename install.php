@@ -6,7 +6,7 @@ $public = rtrim(cfg('PUBLIC_URL'), '/');
 
 function install_unbind_placements(array $auth, string $public): void {
   foreach (
-    [['PLACEMENT' => 'CRM_DEAL_DETAIL_TAB', 'HANDLER' => $public . '/deal_tab.php'], ['PLACEMENT' => 'CONTACT_CENTER', 'HANDLER' => $public . '/index.php']]
+    [['PLACEMENT' => 'CRM_DEAL_DETAIL_TAB', 'HANDLER' => $public . '/deal_tab.php'], ['PLACEMENT' => 'CONTACT_CENTER', 'HANDLER' => $public . '/contact_center.php']]
     as $p
   ) {
     try {
@@ -37,9 +37,9 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
     ]);
     $res2 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CONTACT_CENTER',
-      'HANDLER'   => $public . '/index.php',
+      'HANDLER'   => $public . '/contact_center.php',
       'TITLE'     => 'Telegram (GreyTG)',
-      'DESCRIPTION' => 'Telegram connector (MVP)',
+      'DESCRIPTION' => 'Chat with customer via Telegram',
       'OPTIONS'   => ['width' => 980, 'height' => 900]
     ]);
 
@@ -87,9 +87,9 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
     ]);
     $res2 = b24_call($auth, 'placement.bind', [
       'PLACEMENT' => 'CONTACT_CENTER',
-      'HANDLER'   => $public . '/index.php',
+      'HANDLER'   => $public . '/contact_center.php',
       'TITLE'     => 'Telegram (GreyTG)',
-      'DESCRIPTION' => 'Telegram connector (MVP)',
+      'DESCRIPTION' => 'Chat with customer via Telegram',
       'OPTIONS'   => ['width' => 980, 'height' => 900]
     ]);
 

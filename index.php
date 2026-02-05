@@ -42,7 +42,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
   </div>
 
   <div class="card">
-    <h2>Settings: connect Telegram account</h2>
+    <h2>Connect / disconnect Telegram account</h2>
     <input type="hidden" id="tenant_id" />
     <div class="row">
       <div>
@@ -75,26 +75,6 @@ require_once __DIR__ . '/lib/bootstrap.php';
     <hr/>
     <div class="small">Status / responses</div>
     <pre id="status_out">{}</pre>
-  </div>
-
-  <div class="card">
-    <h2>Send from Deal (MVP)</h2>
-    <div class="row">
-      <div>
-        <label>Deal ID (from placement context)</label>
-        <input id="deal_id" placeholder="123" />
-      </div>
-      <div>
-        <label>Message</label>
-        <textarea id="deal_text" rows="3" placeholder="Hello from Bitrix24"></textarea>
-      </div>
-    </div>
-    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
-      <button onclick="App.sendFromDeal()">Send</button>
-    </div>
-    <hr/>
-    <div class="small">Response</div>
-    <pre id="deal_out">{}</pre>
   </div>
 
   <div class="card">

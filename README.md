@@ -4,13 +4,12 @@ This is an **MVP** Bitrix24 app package you can deploy on any HTTPS host (your s
 then upload the ZIP to Bitrix24 (Developer area) for testing.
 
 ## What it implements
-- App UI (Left menu page) with:
-  - **Tenants:** list existing tenants and their status; pick the tenant to use for messaging; create new tenant (any name, not just UUID)
-  - Connect (save Grey API token if required) and check auth status
-  - Start OTP / Verify OTP / Resend / Logout (Telegram session)
-- CRM Deal detail tab (`CRM_DEAL_DETAIL_TAB`): send a message to the deal's client phone (from Contact/Company)
-- Contact Center tile (`CONTACT_CENTER`): opens the same chat UI (MVP)
-- Inbound webhook endpoint (to be used as Grey tenant `callback_url`):
+- **App** (left menu — opens `index.php`):
+  - **Tenant management:** list tenants and status, select tenant, refresh list, create new tenant (any name)
+  - **Connect / disconnect Telegram:** save API token, phone; Start OTP, Verify, Resend; Disconnect (logout)
+- **Deal tab** (`CRM_DEAL_DETAIL_TAB` — inside a Bitrix24 Deal): send a Telegram message to the deal’s contact phone
+- **Contact Center** (`CONTACT_CENTER` — inside Bitrix24 Contact Center): chat with customer (send message to phone or @username); inbound messages go to CRM timeline and notifications
+- **Inbound webhook** (Grey tenant `callback_url`):
   - Creates/updates CRM Contact by phone
   - Creates a new Deal if no existing Deal found for that Contact (MVP rule)
   - Adds a CRM timeline comment and notifies the assigned user
