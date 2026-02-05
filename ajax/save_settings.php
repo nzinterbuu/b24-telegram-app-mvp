@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/b24.php';
+require_once __DIR__ . '/../lib/grey.php';
 
 try {
   $req = read_json();
@@ -8,12 +9,28 @@ try {
   $u = b24_call($auth, 'user.current');
   $userId = (int)($u['result']['ID'] ?? 0);
 
+  $tenantId = $req['tenant_id'] ?? null;
+  $apiToken = isset($req['api_token']) ? trim((string)$req['api_token']) : null;
+  $phone = isset($req['phone']) ? trim((string)$req['phone']) : null;
+
   db_save_user_settings($auth, $userId, [
-    'tenant_id' => $req['tenant_id'] ?? null,
-    'api_token' => $req['api_token'] ?? null,
-    'phone' => $req['phone'] ?? null,
+    'tenant_id' => $tenantId,
+    'api_token' => $apiToken,
+    'phone' => $phone,
   ]);
-  json_response(['ok'=>true,'user_id'=>$userId]);
+
+  $callbackSet = false;
+  if ($tenantId !== null && $tenantId !== '') {
+    $callbackUrl = rtrim(cfg('PUBLIC_URL'), '/') . '/webhook/grey_inbound.php';
+    try {
+      grey_call($tenantId, $apiToken, '/callback', 'PUT', ['callback_url' => $callbackUrl]);
+      $callbackSet = true;
+    } catch (Throwable $e) {
+      log_debug('tenant callback set failed', ['tenant_id' => $tenantId, 'e' => $e->getMessage()]);
+    }
+  }
+
+  json_response(['ok' => true, 'user_id' => $userId, 'callback_set' => $callbackSet]);
 } catch (Throwable $e) {
-  json_response(['error'=>$e->getMessage(),'message'=>$e->getMessage()], 400);
+  json_response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 400);
 }
