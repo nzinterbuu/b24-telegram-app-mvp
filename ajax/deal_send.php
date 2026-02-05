@@ -11,39 +11,40 @@ function normalize_phone(?string $phone): ?string {
   return $p;
 }
 
-function deal_id_from_placement_options($raw): ?int {
-  if ($raw === null || $raw === '') return null;
-  $raw = (string)$raw;
-  $data = json_decode($raw, true);
-  if (!is_array($data)) {
-    $decoded = base64_decode(str_replace(['-', '_'], ['+', '/'], $raw), true);
-    $data = is_string($decoded) ? json_decode($decoded, true) : null;
-  }
-  if (!is_array($data)) return null;
-  $id = $data['ID'] ?? $data['id'] ?? $data['ENTITY_ID'] ?? $data['entityId'] ?? $data['dealId'] ?? $data['OWNER_ID'] ?? null;
-  return $id !== null ? (int)$id : null;
-}
-
 try {
-  $req = read_json();
-  if (!is_array($req) || empty($req)) {
-    $req = $_POST;
+  $raw = file_get_contents('php://input');
+  $body = is_string($raw) ? json_decode($raw, true) : null;
+  if (!is_array($body)) $body = [];
+  $req = $body;
+  if (empty($req)) $req = $_POST;
+
+  $dealId = (int)($body['deal_id'] ?? 0);
+  if ($dealId <= 0) $dealId = (int)($_POST['deal_id'] ?? 0);
+
+  if ($dealId <= 0 && isset($_REQUEST['PLACEMENT_OPTIONS'])) {
+    $opts = $_REQUEST['PLACEMENT_OPTIONS'];
+    if (is_string($opts)) {
+      $opts = urldecode($opts);
+      $opts = json_decode($opts, true) ?: (function ($s) {
+        $b = base64_decode($s, true);
+        return $b ? json_decode($b, true) : null;
+      })($opts);
+    }
+    if (is_array($opts)) {
+      $dealId = (int)($opts['ID'] ?? $opts['id'] ?? $opts['ENTITY_ID'] ?? $opts['entityId'] ?? 0);
+    }
   }
+
   $auth = $req['auth'] ?? [];
-  $dealId = (int)($req['deal_id'] ?? 0);
-  if (!$dealId) {
-    $dealId = deal_id_from_placement_options($req['placement_options'] ?? null);
-  }
-  if (!$dealId && isset($_GET['PLACEMENT_OPTIONS'])) {
-    $dealId = deal_id_from_placement_options($_GET['PLACEMENT_OPTIONS']);
-  }
-  if (!$dealId && isset($_GET['placement_options'])) {
-    $dealId = deal_id_from_placement_options($_GET['placement_options']);
-  }
   $phoneParam = isset($req['phone']) ? trim((string)$req['phone']) : null;
   $text = trim((string)($req['text'] ?? ''));
   if ($text === '') throw new Exception("Message text is empty");
-  if (!$dealId && !$phoneParam) throw new Exception("Provide deal_id or phone.");
+  if ($dealId <= 0 && !$phoneParam) {
+    http_response_code(400);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['ok' => false, 'error' => 'Missing deal_id. Open this tab from a Deal card.']);
+    exit;
+  }
 
   $u = b24_call($auth, 'user.current');
   $userId = (int)($u['result']['ID'] ?? 0);

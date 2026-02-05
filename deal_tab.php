@@ -1,32 +1,47 @@
 <?php
 require_once __DIR__ . '/lib/bootstrap.php';
 
-function deal_tab_placement_options_id(): ?int {
-  $raw = $_GET['PLACEMENT_OPTIONS'] ?? $_GET['placement_options'] ?? null;
-  if ($raw === null || $raw === '') return null;
-  $raw = (string)$raw;
-  $data = json_decode($raw, true);
-  if (!is_array($data)) {
-    $decoded = base64_decode(str_replace(['-', '_'], ['+', '/'], $raw), true);
-    $data = is_string($decoded) ? json_decode($decoded, true) : null;
+function extract_deal_id_from_placement_options($opts): int {
+  if (!$opts) return 0;
+
+  if (is_array($opts)) {
+    return (int)($opts['ID'] ?? $opts['id'] ?? $opts['ENTITY_ID'] ?? $opts['entityId'] ?? 0);
   }
-  if (!is_array($data)) return null;
-  $id = $data['ID'] ?? $data['id'] ?? $data['ENTITY_ID'] ?? $data['entityId'] ?? $data['dealId'] ?? $data['OWNER_ID'] ?? null;
-  return $id !== null ? (int)$id : null;
+
+  if (is_string($opts)) {
+    $s = urldecode($opts);
+
+    // try JSON
+    $j = json_decode($s, true);
+    if (is_array($j)) {
+      return (int)($j['ID'] ?? $j['id'] ?? $j['ENTITY_ID'] ?? $j['entityId'] ?? 0);
+    }
+
+    // try base64(JSON)
+    $b = base64_decode($s, true);
+    if ($b !== false) {
+      $j2 = json_decode($b, true);
+      if (is_array($j2)) {
+        return (int)($j2['ID'] ?? $j2['id'] ?? $j2['ENTITY_ID'] ?? $j2['entityId'] ?? 0);
+      }
+    }
+  }
+
+  return 0;
 }
 
-function deal_tab_id_from_referer(): ?int {
-  $referer = isset($_SERVER['HTTP_REFERER']) ? (string)$_SERVER['HTTP_REFERER'] : '';
-  if ($referer === '') return null;
-  // Bitrix24 deal URL: https://portal.bitrix24.ru/crm/deal/details/8/ or .../crm/deal/details/8
-  if (preg_match('~/crm/deal/details/(\d+)(?:/|$|\?)~i', $referer, $m)) return (int)$m[1];
-  if (preg_match('~/deal/details/(\d+)(?:/|$|\?)~i', $referer, $m)) return (int)$m[1];
-  return null;
+$placement = $_REQUEST['PLACEMENT'] ?? '';
+$deal_id = 0;
+
+// IMPORTANT: REQUEST (covers POST), NOT GET
+if (isset($_REQUEST['PLACEMENT_OPTIONS'])) {
+  $deal_id = extract_deal_id_from_placement_options($_REQUEST['PLACEMENT_OPTIONS']);
 }
 
-$dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) ? (int)$_GET['id'] : (isset($_REQUEST['ENTITY_ID']) ? (int)$_REQUEST['ENTITY_ID'] : null));
-if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_placement_options_id();
-if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_id_from_referer();
+// fallback: allow manual testing with ?deal_id=123
+if ($deal_id <= 0 && isset($_GET['deal_id'])) {
+  $deal_id = (int)$_GET['deal_id'];
+}
 ?><!doctype html>
 <html>
 <head>
@@ -39,9 +54,12 @@ if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_id_from_referer();
 <div class="container">
   <div class="card">
     <h2>Telegram chat</h2>
+    <div style="font-size:12px;opacity:.7">
+      placement=<?= htmlspecialchars((string)$placement) ?>, deal_id=<?= (int)$deal_id ?>
+    </div>
     <div class="small">Send a Telegram message to the client phone linked to this deal.</div>
     <hr/>
-    <input type="hidden" id="deal_id" name="deal_id" value="<?= (int)($dealIdFromServer ?? 0) ?>" />
+    <input type="hidden" id="deal_id" name="deal_id" value="<?= (int)$deal_id ?>" />
     <div id="ctx" class="small"></div>
     <div id="phone_row" class="small" style="display:none; margin-top:8px;">
       <label>Phone (E.164, e.g. +79001234567)</label>
@@ -76,48 +94,7 @@ async function api(path, body) {
   return json;
 }
 
-var dealId = <?= json_encode($dealIdFromServer) ?>;
-
-function getDealIdFromUrl() {
-  try {
-    var params = new URLSearchParams(window.location.search);
-    var v = params.get('ID') || params.get('id') || params.get('deal_id') || params.get('ENTITY_ID') || params.get('entityId');
-    return v ? (parseInt(v, 10) || null) : null;
-  } catch (e) { return null; }
-}
-
-function getDealIdFromPlacementOptions() {
-  try {
-    var params = new URLSearchParams(window.location.search);
-    var raw = params.get('PLACEMENT_OPTIONS') || params.get('placement_options');
-    if (!raw) return null;
-    var data = null;
-    try { data = JSON.parse(raw); } catch (e1) {}
-    if (!data) {
-      try {
-        var decoded = atob(raw.replace(/-/g, '+').replace(/_/g, '/'));
-        data = JSON.parse(decoded);
-      } catch (e2) { return null; }
-    }
-    var id = data && (data.ID !== undefined ? data.ID : data.id !== undefined ? data.id : data.ENTITY_ID !== undefined ? data.ENTITY_ID : data.entityId !== undefined ? data.entityId : data.dealId !== undefined ? data.dealId : data.OWNER_ID);
-    return id != null ? (parseInt(id, 10) || null) : null;
-  } catch (e) { return null; }
-}
-
-function getDealIdFromReferrer() {
-  try {
-    var r = document.referrer || '';
-    if (!r) return null;
-    var m = r.match(/\/crm\/deal\/details\/(\d+)(?:\/|$|\?)/i) || r.match(/\/deal\/details\/(\d+)(?:\/|$|\?)/i);
-    return m ? parseInt(m[1], 10) : null;
-  } catch (e) { return null; }
-}
-
-function setDealIdInput(val) {
-  dealId = val ? (parseInt(val, 10) || null) : null;
-  var el = document.getElementById('deal_id');
-  if (el) el.value = dealId ? String(dealId) : '';
-}
+var dealId = <?= json_encode((int)$deal_id) ?>;
 
 function updateCtx() {
   var ctx = document.getElementById('ctx');
@@ -131,38 +108,27 @@ function updateCtx() {
   }
 }
 
-BX24.init(function() {
-  BX24.resizeWindow(800, 600);
-  if (!dealId) dealId = getDealIdFromUrl();
-  if (!dealId) dealId = getDealIdFromPlacementOptions();
-  if (!dealId) dealId = getDealIdFromReferrer();
+function setDealId(id) {
+  if (!id) return;
+  var el = document.getElementById('deal_id');
+  if (!el) return;
+  el.value = String(id);
+  dealId = parseInt(id, 10) || null;
+  updateCtx();
+}
 
-  function applyDealIdAndUpdate() {
-    var el = document.getElementById('deal_id');
-    if (el) el.value = dealId ? String(dealId) : '';
-    updateCtx();
-  }
+BX24.init(function () {
+  BX24.fitWindow();
+  updateCtx();
 
-  if (typeof BX24.placement.getOptions === 'function') {
-    var opts = BX24.placement.getOptions();
-    if (opts && !dealId) {
-      var raw = opts.ID || opts.id || opts.ENTITY_ID || opts.entityId || opts.dealId || opts.OWNER_ID;
-      if (raw != null) dealId = parseInt(raw, 10) || null;
-    }
-    applyDealIdAndUpdate();
-  } else {
-    BX24.placement.info(function(info) {
-      if (!dealId && info) {
-        var opt = (info && info.options) || info || {};
-        var raw = opt.ID || opt.id || opt.ENTITY_ID || opt.entityId || opt.dealId || opt.OWNER_ID;
-        if (raw != null) dealId = parseInt(raw, 10) || null;
-      }
-      if (!dealId) dealId = getDealIdFromUrl();
-      if (!dealId) dealId = getDealIdFromPlacementOptions();
-      if (!dealId) dealId = getDealIdFromReferrer();
-      applyDealIdAndUpdate();
+  var existing = document.getElementById('deal_id') && document.getElementById('deal_id').value;
+  if (existing && existing !== '' && existing !== '0') return; // keep server-side deal_id
+
+  if (BX24.placement && BX24.placement.getOptions) {
+    BX24.placement.getOptions(function (opts) {
+      var id = opts && (opts.ID || opts.id || opts.ENTITY_ID || opts.entityId || opts.OWNER_ID || null);
+      setDealId(id);
     });
-    applyDealIdAndUpdate();
   }
 });
 
