@@ -19,7 +19,7 @@ $dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) 
     <label>Message</label>
     <textarea id="deal_text" rows="4" placeholder="Write message..."></textarea>
     <div style="margin-top:10px;">
-      <button onclick="send()">Send</button>
+      <button id="deal_send_btn" onclick="send()" disabled>Send</button>
     </div>
     <hr/>
     <pre id="out">{}</pre>
@@ -51,29 +51,66 @@ function getDealIdFromUrl() {
   try {
     var params = new URLSearchParams(window.location.search);
     var v = params.get('ID') || params.get('id') || params.get('deal_id') || params.get('ENTITY_ID') || params.get('entityId');
-    return v ? (parseInt(v, 10) || v) : null;
+    return v ? (parseInt(v, 10) || null) : null;
   } catch (e) { return null; }
+}
+
+function getDealIdFromReferrer() {
+  try {
+    var r = document.referrer || '';
+    if (!r) return null;
+    var m = r.match(/\/(?:crm\/)?deal(?:\/details)?\/(\d+)(?:\/|$|\?)/i) || r.match(/\/(\d+)\/(?:\?|$)/);
+    return m ? parseInt(m[1], 10) : null;
+  } catch (e) { return null; }
+}
+
+function refreshDealId() {
+  if (dealId) return dealId;
+  dealId = getDealIdFromUrl();
+  if (!dealId) dealId = getDealIdFromReferrer();
+  return dealId;
+}
+
+function updateCtx() {
+  refreshDealId();
+  var ctx = document.getElementById('ctx');
+  var btn = document.getElementById('deal_send_btn');
+  if (dealId) {
+    ctx.textContent = 'Deal: ' + dealId;
+    if (btn) btn.disabled = false;
+  } else {
+    ctx.textContent = 'Deal ID not found. Open this tab from a Deal card.';
+    if (btn) btn.disabled = true;
+  }
 }
 
 BX24.init(function() {
   BX24.resizeWindow(800, 600);
   if (!dealId) dealId = getDealIdFromUrl();
+  if (!dealId) dealId = getDealIdFromReferrer();
   BX24.placement.info(function(info){
     if (!dealId && info) {
       var opt = info.options || {};
       var raw = opt.ID || opt.id || opt.ENTITY_ID || opt.entityId || opt.dealId || info.ID || info.id || info.ENTITY_ID || opt.OWNER_ID;
-      dealId = raw ? (parseInt(raw, 10) || raw) : null;
+      dealId = raw ? (parseInt(raw, 10) || null) : null;
     }
     if (!dealId) dealId = getDealIdFromUrl();
-    document.getElementById('ctx').textContent = dealId ? ('Deal: ' + dealId) : 'Deal ID not found. Open this tab from a Deal card.';
+    if (!dealId) dealId = getDealIdFromReferrer();
+    updateCtx();
   });
+  updateCtx();
 });
 
 async function send(){
   var out = document.getElementById('out');
   try {
+    refreshDealId();
+    if (!dealId) {
+      out.textContent = 'Error: Deal ID not found. Open this tab from a Deal card and try again.';
+      return;
+    }
     var text = document.getElementById('deal_text').value;
-    var data = await api('ajax/send_from_deal.php', {deal_id: String(dealId||''), text: text});
+    var data = await api('ajax/send_from_deal.php', { deal_id: dealId, text: text });
     out.textContent = JSON.stringify(data, null, 2);
   } catch (e) {
     out.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
