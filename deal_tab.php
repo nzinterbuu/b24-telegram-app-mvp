@@ -41,6 +41,7 @@ if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_id_from_referer();
     <h2>Telegram chat</h2>
     <div class="small">Send a Telegram message to the client phone linked to this deal.</div>
     <hr/>
+    <input type="hidden" id="deal_id" name="deal_id" value="<?= (int)($dealIdFromServer ?? 0) ?>" />
     <div id="ctx" class="small"></div>
     <div id="phone_row" class="small" style="display:none; margin-top:8px;">
       <label>Phone (E.164, e.g. +79001234567)</label>
@@ -107,22 +108,18 @@ function getDealIdFromReferrer() {
   try {
     var r = document.referrer || '';
     if (!r) return null;
-    // Bitrix24 deal URL: https://b24-xxx.bitrix24.ru/crm/deal/details/8/
     var m = r.match(/\/crm\/deal\/details\/(\d+)(?:\/|$|\?)/i) || r.match(/\/deal\/details\/(\d+)(?:\/|$|\?)/i);
     return m ? parseInt(m[1], 10) : null;
   } catch (e) { return null; }
 }
 
-function refreshDealId() {
-  if (dealId) return dealId;
-  dealId = getDealIdFromUrl();
-  if (!dealId) dealId = getDealIdFromPlacementOptions();
-  if (!dealId) dealId = getDealIdFromReferrer();
-  return dealId;
+function setDealIdInput(val) {
+  dealId = val ? (parseInt(val, 10) || null) : null;
+  var el = document.getElementById('deal_id');
+  if (el) el.value = dealId ? String(dealId) : '';
 }
 
 function updateCtx() {
-  refreshDealId();
   var ctx = document.getElementById('ctx');
   var phoneRow = document.getElementById('phone_row');
   if (dealId) {
@@ -137,33 +134,51 @@ function updateCtx() {
 BX24.init(function() {
   BX24.resizeWindow(800, 600);
   if (!dealId) dealId = getDealIdFromUrl();
+  if (!dealId) dealId = getDealIdFromPlacementOptions();
   if (!dealId) dealId = getDealIdFromReferrer();
-  BX24.placement.info(function(info){
-    if (!dealId && info) {
-      var opt = info.options || {};
-      var raw = opt.ID || opt.id || opt.ENTITY_ID || opt.entityId || opt.dealId || info.ID || info.id || info.ENTITY_ID || opt.OWNER_ID;
-      dealId = raw ? (parseInt(raw, 10) || null) : null;
-    }
-    if (!dealId) dealId = getDealIdFromUrl();
-    if (!dealId) dealId = getDealIdFromPlacementOptions();
-    if (!dealId) dealId = getDealIdFromReferrer();
+
+  function applyDealIdAndUpdate() {
+    var el = document.getElementById('deal_id');
+    if (el) el.value = dealId ? String(dealId) : '';
     updateCtx();
-  });
-  updateCtx();
+  }
+
+  if (typeof BX24.placement.getOptions === 'function') {
+    var opts = BX24.placement.getOptions();
+    if (opts && !dealId) {
+      var raw = opts.ID || opts.id || opts.ENTITY_ID || opts.entityId || opts.dealId || opts.OWNER_ID;
+      if (raw != null) dealId = parseInt(raw, 10) || null;
+    }
+    applyDealIdAndUpdate();
+  } else {
+    BX24.placement.info(function(info) {
+      if (!dealId && info) {
+        var opt = (info && info.options) || info || {};
+        var raw = opt.ID || opt.id || opt.ENTITY_ID || opt.entityId || opt.dealId || opt.OWNER_ID;
+        if (raw != null) dealId = parseInt(raw, 10) || null;
+      }
+      if (!dealId) dealId = getDealIdFromUrl();
+      if (!dealId) dealId = getDealIdFromPlacementOptions();
+      if (!dealId) dealId = getDealIdFromReferrer();
+      applyDealIdAndUpdate();
+    });
+    applyDealIdAndUpdate();
+  }
 });
 
 async function send(){
   var out = document.getElementById('out');
   try {
-    refreshDealId();
+    var dealIdEl = document.getElementById('deal_id');
+    var currentDealId = dealIdEl ? (parseInt(dealIdEl.value, 10) || null) : dealId;
     var text = document.getElementById('deal_text').value.trim();
     if (!text) {
       out.textContent = 'Error: Message text is empty.';
       return;
     }
-    var body = { text: text };
-    if (dealId) {
-      body.deal_id = dealId;
+    var body = { text: text, deal_id: currentDealId || '' };
+    if (currentDealId) {
+      body.deal_id = currentDealId;
     } else {
       var phone = (document.getElementById('deal_phone') || {}).value.trim();
       if (!phone) {
@@ -172,7 +187,9 @@ async function send(){
       }
       body.phone = phone;
     }
-    var data = await api('ajax/send_from_deal.php', body);
+    var placementOpts = new URLSearchParams(window.location.search).get('PLACEMENT_OPTIONS') || new URLSearchParams(window.location.search).get('placement_options');
+    if (placementOpts) body.placement_options = placementOpts;
+    var data = await api('ajax/deal_send.php', body);
     out.textContent = JSON.stringify(data, null, 2);
   } catch (e) {
     out.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
