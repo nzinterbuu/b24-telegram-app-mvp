@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/lib/bootstrap.php';
+$dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) ? (int)$_GET['id'] : (isset($_REQUEST['ENTITY_ID']) ? (int)$_REQUEST['ENTITY_ID'] : null));
 ?><!doctype html>
 <html>
 <head>
@@ -44,13 +45,27 @@ async function api(path, body) {
   return json;
 }
 
-var dealId = null;
+var dealId = <?= json_encode($dealIdFromServer) ?>;
+
+function getDealIdFromUrl() {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var v = params.get('ID') || params.get('id') || params.get('deal_id') || params.get('ENTITY_ID') || params.get('entityId');
+    return v ? (parseInt(v, 10) || v) : null;
+  } catch (e) { return null; }
+}
 
 BX24.init(function() {
   BX24.resizeWindow(800, 600);
+  if (!dealId) dealId = getDealIdFromUrl();
   BX24.placement.info(function(info){
-    dealId = info.options && (info.options.ID || info.options.ENTITY_ID || info.options.entityId);
-    document.getElementById('ctx').textContent = 'Deal: ' + dealId;
+    if (!dealId && info) {
+      var opt = info.options || {};
+      var raw = opt.ID || opt.id || opt.ENTITY_ID || opt.entityId || opt.dealId || info.ID || info.id || info.ENTITY_ID || opt.OWNER_ID;
+      dealId = raw ? (parseInt(raw, 10) || raw) : null;
+    }
+    if (!dealId) dealId = getDealIdFromUrl();
+    document.getElementById('ctx').textContent = dealId ? ('Deal: ' + dealId) : 'Deal ID not found. Open this tab from a Deal card.';
   });
 });
 
