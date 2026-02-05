@@ -56,6 +56,8 @@ try {
     ]);
   }
 
+  message_log_insert('out', portal_key($auth), $s['tenant_id'], $phone, $text, $dealId ?: null, 'deal_tab', null);
+
   json_response(['ok'=>true,'phone'=>$phone,'grey'=>$sent]);
 
 } catch (Throwable $e) {

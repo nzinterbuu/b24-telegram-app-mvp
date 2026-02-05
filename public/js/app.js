@@ -198,7 +198,38 @@ async function sendFromDeal(){
   }
 }
 
+function escapeHtml(s) {
+  var d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+async function loadMessageLog() {
+  var wrap = el('message_log_wrap');
+  if (!wrap) return;
+  try {
+    var data = await api('ajax/get_message_log.php', { limit: 80 });
+    var messages = data.messages || [];
+    if (messages.length === 0) {
+      wrap.innerHTML = '<p class="small">No messages yet. Inbound messages appear here when the webhook is called; outbound when you send from Deal tab or Contact Center.</p>';
+      return;
+    }
+    var rows = messages.map(function(m) {
+      var dir = m.direction === 'in' ? 'IN' : 'OUT';
+      var dirCls = m.direction === 'in' ? 'msg-in' : 'msg-out';
+      var when = m.created_at ? new Date(m.created_at * 1000).toLocaleString() : '—';
+      var src = m.source || '—';
+      var err = m.error_text ? '<span class="msg-err">' + escapeHtml(m.error_text) + '</span>' : '';
+      return '<tr class="' + dirCls + '"><td>' + when + '</td><td>' + dir + '</td><td>' + escapeHtml(m.peer || '—') + '</td><td>' + escapeHtml((m.text_preview || '').substring(0, 120)) + (m.text_preview && m.text_preview.length > 120 ? '…' : '') + '</td><td>' + (m.deal_id ? '#' + m.deal_id : '—') + '</td><td>' + escapeHtml(src) + '</td><td>' + err + '</td></tr>';
+    });
+    wrap.innerHTML = '<table class="message-log-table"><thead><tr><th>Time</th><th>Dir</th><th>Peer</th><th>Text</th><th>Deal</th><th>Source</th><th>Error</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+  } catch (e) {
+    wrap.innerHTML = '<p class="status-err">Error: ' + (e && e.message ? e.message : String(e)) + '</p>';
+  }
+}
+
 window.App = {
   loadSettings, saveSettings, refreshStatus, startOtp, resendOtp, verifyOtp, logout, sendFromDeal,
-  loadTenants, onTenantSelectChange, showCreateTenant, hideCreateTenant, createTenant
+  loadTenants, onTenantSelectChange, showCreateTenant, hideCreateTenant, createTenant,
+  loadMessageLog
 };

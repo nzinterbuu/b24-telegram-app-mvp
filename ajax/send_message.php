@@ -33,6 +33,8 @@ try {
     'allow_import_contact' => true
   ]);
 
+  message_log_insert('out', portal_key($auth), $s['tenant_id'], $peerNormalized ?? $peer, $text, null, 'contact_center', null);
+
   json_response(['ok' => true, 'peer' => $peer, 'grey' => $sent]);
 } catch (Throwable $e) {
   json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], 400);

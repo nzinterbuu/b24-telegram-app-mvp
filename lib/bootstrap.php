@@ -52,7 +52,28 @@ function ensure_db(): PDO {
       member_id TEXT,
       updated_at INTEGER
   )");
+  $pdo->exec("CREATE TABLE IF NOT EXISTS message_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      direction TEXT NOT NULL,
+      portal TEXT NOT NULL,
+      tenant_id TEXT,
+      peer TEXT NOT NULL,
+      text_preview TEXT,
+      deal_id INTEGER,
+      source TEXT,
+      created_at INTEGER NOT NULL,
+      error_text TEXT
+  )");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_message_log_portal_created ON message_log(portal, created_at DESC)");
   return $pdo;
+}
+
+/** Log an inbound or outbound message for the message history. */
+function message_log_insert(string $direction, string $portal, ?string $tenantId, string $peer, string $text, ?int $dealId = null, ?string $source = null, ?string $errorText = null): void {
+  $pdo = ensure_db();
+  $preview = $text !== '' ? mb_substr($text, 0, 500) : '';
+  $stmt = $pdo->prepare("INSERT INTO message_log (direction, portal, tenant_id, peer, text_preview, deal_id, source, created_at, error_text) VALUES (?,?,?,?,?,?,?,?,?)");
+  $stmt->execute([$direction, $portal, $tenantId ?? '', $peer, $preview, $dealId, $source ?? '', time(), $errorText ?? '']);
 }
 
 function log_debug(string $msg, array $ctx=[]): void {

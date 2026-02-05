@@ -82,6 +82,8 @@ try {
     ]);
   }
 
+  message_log_insert('out', portal_key($auth), $s['tenant_id'], $phone, $text, $dealId ?: null, $dealId ? 'deal_tab' : 'contact_center', null);
+
   json_response(['ok'=>true,'phone'=>$phone,'grey'=>$sent]);
 
 } catch (Throwable $e) {

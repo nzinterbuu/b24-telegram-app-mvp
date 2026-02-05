@@ -20,3 +20,10 @@ pre { background: #111827; color: #e5e7eb; padding: 12px; border-radius: 12px; o
 .create-tenant-form { margin-top: 12px; }
 .create-tenant-form input { max-width: 400px; margin-bottom: 8px; }
 select { width: 100%; max-width: 320px; padding: 10px; border: 1px solid #d1d5db; border-radius: 10px; font-size: 14px; }
+.message-log-wrap { margin-top: 8px; overflow-x: auto; max-height: 360px; overflow-y: auto; }
+.message-log-wrap table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.message-log-wrap th, .message-log-wrap td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #e5e7eb; }
+.message-log-wrap th { background: #f9fafb; color: #6b7280; position: sticky; top: 0; }
+.message-log-wrap .msg-in { background: #f0fdf4; }
+.message-log-wrap .msg-out { background: #eff6ff; }
+.message-log-wrap .msg-err { color: #dc2626; font-size: 11px; }

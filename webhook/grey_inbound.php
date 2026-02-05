@@ -177,9 +177,17 @@ try {
     }
   }
 
+  message_log_insert('in', $portal, $tenantId ? (string)$tenantId : null, $phone, $text, $dealId, 'webhook', null);
+
   json_response(['ok' => true, 'contact_id' => $contactId, 'deal_id' => $dealId]);
 
 } catch (Throwable $e) {
   log_debug('inbound error', ['e' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+  $portalForLog = isset($portal) ? $portal : b24_get_first_portal();
+  if ($portalForLog) {
+    try {
+      message_log_insert('in', $portalForLog, null, isset($phone) ? $phone : '', isset($text) ? $text : '', null, 'webhook', $e->getMessage());
+    } catch (Throwable $t) { /* ignore */ }
+  }
   json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], 400);
 }

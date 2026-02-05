@@ -78,6 +78,17 @@ require_once __DIR__ . '/lib/bootstrap.php';
   </div>
 
   <div class="card">
+    <h2>Message history (inbound & outbound)</h2>
+    <p class="small">Recent Telegram messages received by the webhook and sent from the app. Use this to verify that inbound messages are reaching the app.</p>
+    <div style="margin-bottom:8px;">
+      <button type="button" class="secondary" onclick="App.loadMessageLog()">Refresh</button>
+    </div>
+    <div id="message_log_wrap" class="message-log-wrap">
+      <p class="small">Loading…</p>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Inbound webhook (receive messages)</h2>
     <div class="small">
       Set the Grey tenant <strong>callback_url</strong> to this URL so incoming Telegram messages are received:
@@ -95,6 +106,7 @@ BX24.init(function() {
   BX24.resizeWindow(980, 900);
   App.loadTenants()
     .then(function() { return App.loadSettings(); })
+    .then(function() { return App.loadMessageLog(); })
     .catch(function(err) { document.getElementById('status_out').textContent = String(err); });
 });
 </script>
