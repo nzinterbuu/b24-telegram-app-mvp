@@ -15,8 +15,18 @@ function deal_tab_placement_options_id(): ?int {
   return $id !== null ? (int)$id : null;
 }
 
+function deal_tab_id_from_referer(): ?int {
+  $referer = isset($_SERVER['HTTP_REFERER']) ? (string)$_SERVER['HTTP_REFERER'] : '';
+  if ($referer === '') return null;
+  // Bitrix24 deal URL: https://portal.bitrix24.ru/crm/deal/details/8/ or .../crm/deal/details/8
+  if (preg_match('~/crm/deal/details/(\d+)(?:/|$|\?)~i', $referer, $m)) return (int)$m[1];
+  if (preg_match('~/deal/details/(\d+)(?:/|$|\?)~i', $referer, $m)) return (int)$m[1];
+  return null;
+}
+
 $dealIdFromServer = isset($_GET['ID']) ? (int)$_GET['ID'] : (isset($_GET['id']) ? (int)$_GET['id'] : (isset($_REQUEST['ENTITY_ID']) ? (int)$_REQUEST['ENTITY_ID'] : null));
 if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_placement_options_id();
+if ($dealIdFromServer === null) $dealIdFromServer = deal_tab_id_from_referer();
 ?><!doctype html>
 <html>
 <head>
@@ -97,7 +107,8 @@ function getDealIdFromReferrer() {
   try {
     var r = document.referrer || '';
     if (!r) return null;
-    var m = r.match(/\/(?:crm\/)?deal(?:\/details)?\/(\d+)(?:\/|$|\?)/i) || r.match(/\/(\d+)\/(?:\?|$)/);
+    // Bitrix24 deal URL: https://b24-xxx.bitrix24.ru/crm/deal/details/8/
+    var m = r.match(/\/crm\/deal\/details\/(\d+)(?:\/|$|\?)/i) || r.match(/\/deal\/details\/(\d+)(?:\/|$|\?)/i);
     return m ? parseInt(m[1], 10) : null;
   } catch (e) { return null; }
 }
