@@ -78,10 +78,13 @@ require_once __DIR__ . '/lib/bootstrap.php';
   </div>
 
   <div class="card">
-    <h2>Inbound webhook</h2>
+    <h2>Inbound webhook (receive messages)</h2>
     <div class="small">
-      Set Grey tenant callback_url to:
-      <code><?= htmlspecialchars(cfg('PUBLIC_URL')."/webhook/grey_inbound.php") ?></code>
+      Set the Grey tenant <strong>callback_url</strong> to this URL so incoming Telegram messages are received:
+    </div>
+    <p style="margin:8px 0;"><code><?= htmlspecialchars(cfg('PUBLIC_URL')."/webhook/grey_inbound.php") ?></code></p>
+    <div class="small" style="margin-top:8px;">
+      Incoming messages will: appear on the <strong>Deal</strong> (timeline), trigger an <strong>IM notification</strong>, and (if Open Line is configured in config) show in <strong>Contact Center</strong>. Reply from the Deal tab or Contact Center.
     </div>
   </div>
 </div>

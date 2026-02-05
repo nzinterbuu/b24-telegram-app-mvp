@@ -13,7 +13,9 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
 - **Inbound webhook** (Grey tenant `callback_url`):
   - Creates/updates CRM Contact by phone
   - Creates a new Deal if no existing Deal found for that Contact (MVP rule)
-  - Adds a CRM timeline comment and notifies the assigned user
+  - Adds a **CRM timeline comment** on the deal (so you see the message on the Deal)
+  - Sends an **IM notification** to the deal’s assignee, or to a user with app settings, or to an admin
+  - If **Open Lines** is configured (`OPENLINES_LINE_ID` in config): also sends the message into the Open Line so it appears in **Contact Center** and you can reply from there
 
 > Notes:
 > - You must set `config.php` values (PUBLIC_URL, GREY_API_BASE, GREY_API_TOKEN_HEADER, B24_CLIENT_ID, B24_CLIENT_SECRET).
@@ -44,10 +46,17 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
   - **placement** — register deal tab and contact center widgets
   - **im** — send IM notifications
 
+## Receiving incoming messages
+1. **Set the Grey tenant callback URL** to `https://YOUR_PUBLIC_APP_URL/webhook/grey_inbound.php` (see app → Inbound webhook).
+2. Incoming messages then:
+   - **Deal:** Shown as a timeline comment on the deal (and a new deal is created if needed). Open the deal and use the **Telegram chat** tab to reply.
+   - **Notification:** You get an IM notification; open the deal from the link to reply.
+   - **Contact Center / Open Lines (optional):** In Bitrix24 go to **Contact Center** → add an open channel → choose **Telegram (GreyTG)** (registered on install). After the line is created, copy its **Open Line ID** into `config.php` as `OPENLINES_LINE_ID`. Then incoming messages will also appear in that open line so you can chat in Contact Center.
+
 ## Endpoints
-- /install.php (registers placements)
+- /install.php (registers placements and Open Lines connector)
 - /uninstall.php (unregisters placements)
-- /webhook/grey_inbound.php (set as Grey callback_url)
+- /webhook/grey_inbound.php (set as Grey tenant callback_url)
 
 ## Security
 This MVP stores tokens in `storage.sqlite` (SQLite) in the app folder.
