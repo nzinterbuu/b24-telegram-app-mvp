@@ -117,11 +117,16 @@ function b24_call(string $method, array $params = [], ?array $auth = null): arra
   if ($webhook !== '' && !$hasExplicitAuth) {
     $url = $webhook . '/' . $method . '.json';
     $ch = curl_init($url);
+    
+    // Bitrix24 webhooks accept form-encoded POST data (preferred) or JSON
+    // Use form-encoded for better compatibility with nested arrays
+    $postData = http_build_query($params, '', '&', PHP_QUERY_RFC3986);
+    
     curl_setopt_array($ch, [
       CURLOPT_RETURNTRANSFER => true,
       CURLOPT_POST => true,
-      CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
-      CURLOPT_POSTFIELDS => json_encode($params, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+      CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+      CURLOPT_POSTFIELDS => $postData,
       CURLOPT_TIMEOUT => 30,
     ]);
     $raw = curl_exec($ch);
@@ -133,8 +138,19 @@ function b24_call(string $method, array $params = [], ?array $auth = null): arra
     $data = json_decode($raw, true);
     if ($code >= 400) {
       $errorMsg = $data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code);
+      if (cfg('DEBUG')) {
+        $maskedUrl = preg_replace('/(\/rest\/\d+\/)[^\/]+(\/)/', '$1***$2', $url);
+        log_debug('b24_call webhook error', [
+          'method' => $method, 
+          'url' => $maskedUrl, 
+          'code' => $code, 
+          'error' => $errorMsg, 
+          'response' => substr($raw, 0, 500),
+          'params_keys' => array_keys($params)
+        ]);
+      }
       if (strpos($errorMsg, 'Invalid request') !== false || strpos($errorMsg, 'credentials') !== false) {
-        $errorMsg .= " (webhook mode). Check that B24_WEBHOOK_URL is correct.";
+        $errorMsg .= " (webhook mode). Verify B24_WEBHOOK_URL format: https://your-domain.bitrix24.ru/rest/1/your-webhook-code/";
       }
       throw new Exception($errorMsg);
     }
