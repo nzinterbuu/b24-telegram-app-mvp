@@ -19,7 +19,7 @@ try {
   if ($peer === '') throw new Exception("Peer (phone or contact) is required.");
   if ($text === '') throw new Exception("Message text is empty.");
 
-  $u = b24_call($auth, 'user.current');
+  $u = b24_call('user.current', [], $auth);
   $userId = (int)($u['result']['ID'] ?? 0);
   $s = db_get_user_settings($auth, $userId);
   if (empty($s['tenant_id'])) throw new Exception("Select a tenant in the app first.");

@@ -20,6 +20,11 @@ return [
   'B24_CLIENT_ID' => getenv('B24_CLIENT_ID') ?: '',
   'B24_CLIENT_SECRET' => getenv('B24_CLIENT_SECRET') ?: '',
 
+  // Bitrix24 Webhook URL (required for inbound messages). Get from Bitrix24: Settings → Webhooks → Create webhook → copy URL.
+  // Example: https://b24-u0gkt4.bitrix24.ru/rest/1/1bsik1fwzw9bloyz/
+  // When set, all Bitrix24 REST calls use webhook (no OAuth needed for server-side calls like inbound webhook).
+  'B24_WEBHOOK_URL' => getenv('B24_WEBHOOK_URL') ?: '',
+
   // Enable debug logging to logs/app.log
   'DEBUG' => true,
 

@@ -6,7 +6,7 @@ require_once __DIR__ . '/../lib/grey.php';
 try {
   $req = read_json();
   $auth = $req['auth'] ?? [];
-  b24_call($auth, 'user.current');
+  b24_call('user.current', [], $auth);
 
   $raw = grey_app_call('/tenants', 'GET');
   $list = [];

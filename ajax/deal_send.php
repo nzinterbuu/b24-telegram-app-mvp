@@ -46,17 +46,17 @@ try {
     exit;
   }
 
-  $u = b24_call($auth, 'user.current');
+  $u = b24_call('user.current', [], $auth);
   $userId = (int)($u['result']['ID'] ?? 0);
   $s = db_get_user_settings($auth, $userId);
   if (empty($s['tenant_id'])) throw new Exception("Tenant ID not set in Settings.");
 
   if ($dealId) {
-    $deal = b24_call($auth, 'crm.deal.get', ['id'=>$dealId]);
+    $deal = b24_call('crm.deal.get', ['id'=>$dealId], $auth);
     $dealFields = $deal['result'] ?? [];
     $contactId = (int)($dealFields['CONTACT_ID'] ?? 0);
     if (!$contactId) throw new Exception("Deal has no CONTACT_ID. Attach a contact to the deal.");
-    $c = b24_call($auth, 'crm.contact.get', ['id'=>$contactId]);
+    $c = b24_call('crm.contact.get', ['id'=>$contactId], $auth);
     $phones = $c['result']['PHONE'] ?? [];
     $phone = $phones ? ($phones[0]['VALUE'] ?? null) : null;
     $phone = normalize_phone($phone);
@@ -73,7 +73,7 @@ try {
   ]);
 
   if ($dealId) {
-    b24_call($auth, 'crm.timeline.comment.add', [
+    b24_call('crm.timeline.comment.add', [
       'fields' => [
         'ENTITY_TYPE' => 'deal',
         'ENTITY_ID' => $dealId,

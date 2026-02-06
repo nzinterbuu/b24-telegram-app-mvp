@@ -7,8 +7,8 @@ try {
   $auth = $data['auth'] ?? $_REQUEST;
   $public = rtrim(cfg('PUBLIC_URL'), '/');
 
-  $r1 = b24_call($auth, 'placement.unbind', ['PLACEMENT'=>'CRM_DEAL_DETAIL_TAB','HANDLER'=>$public.'/deal_tab.php']);
-  $r2 = b24_call($auth, 'placement.unbind', ['PLACEMENT'=>'CONTACT_CENTER','HANDLER'=>$public.'/contact_center.php']);
+  $r1 = b24_call('placement.unbind', ['PLACEMENT'=>'CRM_DEAL_DETAIL_TAB','HANDLER'=>$public.'/deal_tab.php'], $auth);
+  $r2 = b24_call('placement.unbind', ['PLACEMENT'=>'CONTACT_CENTER','HANDLER'=>$public.'/contact_center.php'], $auth);
 
   // Remove stored OAuth tokens
   $norm = b24_normalize_auth(is_array($auth) ? $auth : []);

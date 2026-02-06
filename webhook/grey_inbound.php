@@ -58,37 +58,30 @@ try {
   $phone = $parsed['phone'];
   $text = $parsed['text'];
 
-  // tenant_id might be in payload for multi-tenant
-  $tenantId = pick($payload, ['tenant_id','tenantId','tenant','connection_id']);
-  $portal = null;
-  if ($tenantId && is_array($payload)) {
-    $pdo = ensure_db();
-    $stmt = $pdo->prepare("SELECT portal FROM user_settings WHERE tenant_id=? LIMIT 1");
-    $stmt->execute([$tenantId]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row) $portal = $row['portal'];
+  // Check webhook is configured (required for inbound)
+  $webhook = rtrim(getenv('B24_WEBHOOK_URL') ?: cfg('B24_WEBHOOK_URL', ''), '/');
+  if ($webhook === '') {
+    http_response_code(500);
+    json_response(['ok' => false, 'error' => 'B24_WEBHOOK_URL is not set. Inbound requires Bitrix webhook. Set B24_WEBHOOK_URL in config/env.']);
+    exit;
   }
-  if (!$portal) {
-    $portal = b24_get_first_portal();
-  }
-  if (!$portal) {
-    throw new Exception("No Bitrix24 portal connected. Install the app in Bitrix24 first.");
-  }
-  $auth = ['portal' => $portal];
 
   if (!$phone || $text === '') {
     throw new Exception("Cannot parse inbound payload (need phone + text). Received keys: " . implode(', ', array_keys($payload)));
   }
 
-  // Find or create contact by phone
-  $contactList = b24_call($auth, 'crm.contact.list', [
+  // tenant_id might be in payload for multi-tenant (for logging)
+  $tenantId = pick($payload, ['tenant_id','tenantId','tenant','connection_id']);
+
+  // Find or create contact by phone (webhook mode, no auth needed)
+  $contactList = b24_call('crm.contact.list', [
     'filter' => ['PHONE' => $phone],
     'select' => ['ID','NAME']
   ]);
   $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
 
   if (!$contactId) {
-    $addC = b24_call($auth, 'crm.contact.add', [
+    $addC = b24_call('crm.contact.add', [
       'fields' => [
         'NAME' => 'Telegram ' . preg_replace('/\+/', '', $phone),
         'PHONE' => [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']]
@@ -97,7 +90,7 @@ try {
     $contactId = (int)($addC['result'] ?? 0);
   }
 
-  $dealList = b24_call($auth, 'crm.deal.list', [
+  $dealList = b24_call('crm.deal.list', [
     'filter' => ['CONTACT_ID' => $contactId],
     'select' => ['ID','ASSIGNED_BY_ID'],
     'order' => ['ID' => 'DESC'],
@@ -107,7 +100,7 @@ try {
   $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
 
   if (!$dealId) {
-    $addD = b24_call($auth, 'crm.deal.add', [
+    $addD = b24_call('crm.deal.add', [
       'fields' => [
         'TITLE' => 'Telegram: ' . $phone,
         'CONTACT_ID' => $contactId
@@ -117,7 +110,7 @@ try {
   }
 
   // 1) Deal timeline — always add so the message is visible on the deal
-  b24_call($auth, 'crm.timeline.comment.add', [
+  b24_call('crm.timeline.comment.add', [
     'fields' => [
       'ENTITY_TYPE' => 'deal',
       'ENTITY_ID' => $dealId,
@@ -125,22 +118,22 @@ try {
     ]
   ]);
 
-  // 2) Notify: assigned user, or first user with settings for this portal, or user 1
+  // 2) Notify: assigned user, or first user with settings for this tenant, or admin
   $notifyUserId = $assigned;
-  if (!$notifyUserId) {
+  if (!$notifyUserId && $tenantId) {
     $pdo = ensure_db();
-    $stmt = $pdo->prepare("SELECT user_id FROM user_settings WHERE portal=? LIMIT 1");
-    $stmt->execute([$portal]);
+    $stmt = $pdo->prepare("SELECT user_id FROM user_settings WHERE tenant_id=? LIMIT 1");
+    $stmt->execute([$tenantId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) $notifyUserId = (int)$row['user_id'];
   }
   if (!$notifyUserId) {
-    $u = b24_call($auth, 'user.get', ['filter' => ['ADMIN' => 'Y'], 'limit' => 1]);
+    $u = b24_call('user.get', ['filter' => ['ADMIN' => 'Y'], 'limit' => 1]);
     $notifyUserId = !empty($u['result'][0]['ID']) ? (int)$u['result'][0]['ID'] : 0;
   }
   if ($notifyUserId) {
     try {
-      b24_call($auth, 'im.notify', [
+      b24_call('im.notify', [
         'to' => $notifyUserId,
         'message' => "Telegram from {$phone}:\n{$text}\n[Deal #{$dealId}]",
         'message_out' => 'Y'
@@ -159,7 +152,7 @@ try {
       $chatId = 'tg_' . preg_replace('/[^0-9a-zA-Z]/', '_', $phone);
       $userName = 'Telegram ' . $phone;
       if (strlen($userName) > 25) $userName = substr($userName, 0, 22) . '…';
-      b24_call($auth, 'imconnector.send.messages', [
+      b24_call('imconnector.send.messages', [
         'CONNECTOR' => $connectorId,
         'LINE' => $lineId,
         'MESSAGES' => [
@@ -188,22 +181,16 @@ try {
     }
   }
 
-  message_log_insert('in', $portal, $tenantId ? (string)$tenantId : null, $phone, $text, $dealId, 'webhook', null);
+  $portalForLog = b24_get_first_portal() ?: 'unknown';
+  message_log_insert('in', $portalForLog, $tenantId ? (string)$tenantId : null, $phone, $text, $dealId, 'webhook', null);
 
   json_response(['ok' => true, 'contact_id' => $contactId, 'deal_id' => $dealId]);
 
 } catch (Throwable $e) {
   log_debug('inbound error', ['e' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-  $portalForLog = isset($portal) ? $portal : b24_get_first_portal();
-  if ($portalForLog) {
-    try {
-      message_log_insert('in', $portalForLog, null, isset($phone) ? $phone : '', isset($text) ? $text : '', null, 'webhook', $e->getMessage());
-    } catch (Throwable $t) { /* ignore */ }
-  }
-  $isAuthError = (strpos($e->getMessage(), 'Bitrix24') !== false && (strpos($e->getMessage(), 'token') !== false || strpos($e->getMessage(), 'auth') !== false));
-  $code = $isAuthError ? 200 : 400;
-  if ($isAuthError) {
-    header('X-Inbound-Error: auth');
-  }
-  json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], $code);
+  $portalForLog = b24_get_first_portal() ?: 'unknown';
+  try {
+    message_log_insert('in', $portalForLog, null, isset($phone) ? $phone : '', isset($text) ? $text : '', null, 'webhook', $e->getMessage());
+  } catch (Throwable $t) { /* ignore */ }
+  json_response(['ok' => false, 'error' => $e->getMessage(), 'message' => $e->getMessage()], 400);
 }

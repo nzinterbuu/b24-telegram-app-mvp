@@ -6,7 +6,7 @@ require_once __DIR__ . '/../lib/grey.php';
 try {
   $req = read_json();
   $auth = $req['auth'] ?? [];
-  $u = b24_call($auth, 'user.current');
+  $u = b24_call('user.current', [], $auth);
   $userId = (int)($u['result']['ID'] ?? 0);
 
   $tenantId = $req['tenant_id'] ?? null;

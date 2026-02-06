@@ -100,7 +100,36 @@ function b24_get_first_portal(): ?string {
   return $row ? $row['portal'] : null;
 }
 
-function b24_call(array $auth, string $method, array $params = []): array {
+function b24_call(string $method, array $params = [], ?array $auth = null): array {
+  // Webhook-first: if B24_WEBHOOK_URL is set, use it (no auth needed)
+  $webhook = rtrim(getenv('B24_WEBHOOK_URL') ?: cfg('B24_WEBHOOK_URL', ''), '/');
+  if ($webhook !== '') {
+    $url = $webhook . '/' . $method . '.json';
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+      CURLOPT_RETURNTRANSFER => true,
+      CURLOPT_POST => true,
+      CURLOPT_HTTPHEADER => ['Content-Type: application/json', 'Accept: application/json'],
+      CURLOPT_POSTFIELDS => json_encode($params, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+      CURLOPT_TIMEOUT => 30,
+    ]);
+    $raw = curl_exec($ch);
+    $err = curl_error($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false) throw new Exception("cURL error: ".$err);
+    $data = json_decode($raw, true);
+    if ($code >= 400) {
+      throw new Exception($data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code));
+    }
+    return is_array($data) ? $data : ['raw'=>$raw];
+  }
+
+  // Fallback: OAuth (for UI calls from iframe)
+  if (!$auth) {
+    throw new Exception("B24_WEBHOOK_URL is not set and no auth provided. Set B24_WEBHOOK_URL in config/env for server-side calls.");
+  }
   $auth = b24_normalize_auth($auth);
   $domain = $auth['domain'] ?? null;
   $token  = $auth['access_token'] ?? null;
