@@ -19,6 +19,7 @@ return [
   // Bitrix24 OAuth (required). From Bitrix24 app registration. Prefer env vars (e.g. Render).
   'B24_CLIENT_ID' => getenv('B24_CLIENT_ID') ?: '',
   'B24_CLIENT_SECRET' => getenv('B24_CLIENT_SECRET') ?: '',
+  'B24_WEBHOOK_URL' => getenv('B24_WEBHOOK_URL') ?: '',
 
   // Enable debug logging to logs/app.log
   'DEBUG' => true,
