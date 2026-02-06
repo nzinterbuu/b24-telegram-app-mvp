@@ -10,6 +10,8 @@ try {
   $userId = (int)($u['result']['ID'] ?? 0);
 
   $s = db_get_user_settings($auth, $userId);
+  $portal = portal_key($auth);
+  $s['line_id'] = get_portal_line_id($portal);
   $status = null;
   if (!empty($s['tenant_id'])) {
     try { $status = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/status', 'GET'); }

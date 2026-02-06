@@ -143,13 +143,18 @@ try {
     }
   }
 
-  // 3) Open Lines / Contact Center — if line is configured, add message so it appears in Contact Center
+  // 3) Open Lines / Contact Center — use ol_map (tenant_id + peer → external_user_id/external_chat_id), send to selected line
+  $portal = b24_get_first_portal();
+  $lineId = $portal ? get_portal_line_id($portal) : null;
+  if ($lineId === null) {
+    $lineId = cfg('OPENLINES_LINE_ID');
+    $lineId = ($lineId !== null && $lineId !== '') ? (string)$lineId : null;
+  }
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
-  $lineId = cfg('OPENLINES_LINE_ID');
-  if ($lineId !== null && $lineId !== '') {
+  if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
+      $ext = ol_map_get_or_create($portal, $lineId, (string)$tenantId, $phone);
       $messageId = 'tg_' . $phone . '_' . time() . '_' . bin2hex(random_bytes(4));
-      $chatId = 'tg_' . preg_replace('/[^0-9a-zA-Z]/', '_', $phone);
       $userName = 'Telegram ' . $phone;
       if (strlen($userName) > 25) $userName = substr($userName, 0, 22) . '…';
       b24_call('imconnector.send.messages', [
@@ -158,7 +163,7 @@ try {
         'MESSAGES' => [
           [
             'user' => [
-              'id' => $phone,
+              'id' => $ext['external_user_id'],
               'name' => $userName,
               'last_name' => '',
               'phone' => $phone,
@@ -170,7 +175,7 @@ try {
               'text' => $text,
             ],
             'chat' => [
-              'id' => $chatId,
+              'id' => $ext['external_chat_id'],
               'name' => $userName,
             ],
           ],

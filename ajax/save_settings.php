@@ -12,12 +12,18 @@ try {
   $tenantId = $req['tenant_id'] ?? null;
   $apiToken = isset($req['api_token']) ? trim((string)$req['api_token']) : null;
   $phone = isset($req['phone']) ? trim((string)$req['phone']) : null;
+  $lineId = isset($req['line_id']) ? trim((string)$req['line_id']) : null;
 
   db_save_user_settings($auth, $userId, [
     'tenant_id' => $tenantId,
     'api_token' => $apiToken,
     'phone' => $phone,
   ]);
+
+  $portal = portal_key($auth);
+  if ($lineId !== null) {
+    set_portal_line_id($portal, $lineId);
+  }
 
   $callbackSet = false;
   if ($tenantId !== null && $tenantId !== '') {
