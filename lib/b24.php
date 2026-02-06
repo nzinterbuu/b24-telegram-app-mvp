@@ -101,9 +101,20 @@ function b24_get_first_portal(): ?string {
 }
 
 function b24_call(string $method, array $params = [], ?array $auth = null): array {
-  // Webhook-first: if B24_WEBHOOK_URL is set, use it (no auth needed)
+  // If auth is provided (from iframe/UI), prefer OAuth over webhook (for install/admin operations)
+  // Check both before and after normalization since AUTH_ID becomes access_token
+  $hasExplicitAuth = $auth && (
+    isset($auth['access_token']) || isset($auth['AUTH_ID']) || 
+    isset($auth['domain']) || isset($auth['DOMAIN'])
+  );
+  
+  if (cfg('DEBUG')) {
+    log_debug('b24_call', ['method' => $method, 'hasExplicitAuth' => $hasExplicitAuth, 'auth_keys' => $auth ? array_keys($auth) : null]);
+  }
+  
+  // Webhook-first: if B24_WEBHOOK_URL is set AND no auth provided, use webhook (no auth needed)
   $webhook = rtrim(getenv('B24_WEBHOOK_URL') ?: cfg('B24_WEBHOOK_URL', ''), '/');
-  if ($webhook !== '') {
+  if ($webhook !== '' && !$hasExplicitAuth) {
     $url = $webhook . '/' . $method . '.json';
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -121,22 +132,32 @@ function b24_call(string $method, array $params = [], ?array $auth = null): arra
     if ($raw === false) throw new Exception("cURL error: ".$err);
     $data = json_decode($raw, true);
     if ($code >= 400) {
-      throw new Exception($data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code));
+      $errorMsg = $data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code);
+      if (strpos($errorMsg, 'Invalid request') !== false || strpos($errorMsg, 'credentials') !== false) {
+        $errorMsg .= " (webhook mode). Check that B24_WEBHOOK_URL is correct.";
+      }
+      throw new Exception($errorMsg);
     }
     return is_array($data) ? $data : ['raw'=>$raw];
   }
 
-  // Fallback: OAuth (for UI calls from iframe)
-  if (!$auth) {
+  // OAuth mode: use explicit auth, or fallback to stored tokens, or require webhook
+  if (!$auth && $webhook === '') {
     throw new Exception("B24_WEBHOOK_URL is not set and no auth provided. Set B24_WEBHOOK_URL in config/env for server-side calls.");
   }
-  $auth = b24_normalize_auth($auth);
-  $domain = $auth['domain'] ?? null;
-  $token  = $auth['access_token'] ?? null;
+  if (!$auth) {
+    $auth = [];
+  }
+  $authNormalized = b24_normalize_auth(is_array($auth) ? $auth : []);
+  $domain = $authNormalized['domain'] ?? null;
+  $token  = $authNormalized['access_token'] ?? null;
 
-  // If no token, try stored OAuth tokens by portal (for server-side e.g. inbound webhook)
+  // If no token from provided auth, try stored OAuth tokens by portal (for server-side e.g. inbound webhook)
   if ((!$domain || !$token)) {
-    $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    $portal = null;
+    if (is_array($auth)) {
+      $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    }
     if ($portal) {
       $stored = b24_get_stored_auth((string)$portal);
       if ($stored) {
@@ -146,7 +167,10 @@ function b24_call(string $method, array $params = [], ?array $auth = null): arra
     }
   }
   if (!$domain || !$token) {
-    $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    $portal = null;
+    if (is_array($auth)) {
+      $portal = $auth['portal'] ?? $auth['domain'] ?? $auth['DOMAIN'] ?? null;
+    }
     if ($portal) {
       throw new Exception("No Bitrix24 tokens for this portal. Re-install the app from Bitrix24 (open app from left menu and run installer) to save OAuth tokens.");
     }
@@ -172,7 +196,14 @@ function b24_call(string $method, array $params = [], ?array $auth = null): arra
   if ($raw === false) throw new Exception("cURL error: ".$err);
   $data = json_decode($raw, true);
   if ($code >= 400) {
-    throw new Exception($data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code));
+    $errorMsg = $data['error_description'] ?? $data['error'] ?? ("Bitrix24 HTTP ".$code);
+    if (cfg('DEBUG')) {
+      log_debug('b24_call error', ['method' => $method, 'code' => $code, 'error' => $errorMsg, 'response' => $data, 'domain' => $domain, 'has_token' => !empty($token)]);
+    }
+    if (strpos($errorMsg, 'Invalid request') !== false || strpos($errorMsg, 'credentials') !== false) {
+      $errorMsg .= " (OAuth mode). The access token may be expired or invalid. Try refreshing the page or re-installing the app.";
+    }
+    throw new Exception($errorMsg);
   }
   return is_array($data) ? $data : ['raw'=>$raw];
 }

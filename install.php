@@ -172,19 +172,32 @@ h2{margin:0 0 16px;font-size:18px;}
     return;
   }
   BX24.init(function(){
-    var auth = BX24.getAuth();
-    if (!auth || !auth.access_token || !auth.domain) {
+    function getAuthSync() {
+      var auth = BX24.getAuth();
+      if (auth && auth.access_token && auth.domain) return auth;
       var params = new URLSearchParams(window.location.search);
       var domain = params.get("domain") || params.get("DOMAIN");
       var token = params.get("auth") || params.get("AUTH_ID");
       if (domain && token) {
-        auth = {domain: domain, access_token: token, refresh_token: params.get("REFRESH_ID") || ""};
+        return {domain: domain, access_token: token, refresh_token: params.get("REFRESH_ID") || ""};
       }
+      return null;
     }
+    var auth = getAuthSync();
     if (!auth || !auth.access_token || !auth.domain) {
-      setMsg("Could not get Bitrix24 auth. Ensure you are logged in as administrator.", true);
+      BX24.getAuth(function(authFromCallback) {
+        if (authFromCallback && authFromCallback.access_token && authFromCallback.domain) {
+          proceedInstall(authFromCallback);
+        } else {
+          setMsg("Could not get Bitrix24 auth. Ensure you are logged in as administrator.", true);
+        }
+      });
       return;
     }
+    proceedInstall(auth);
+  });
+  
+  function proceedInstall(auth) {
     setMsg("Registering placements...");
     var expiresIn = (typeof auth.expires_in === "number" ? auth.expires_in : 3600);
     fetch("' . htmlspecialchars($public) . '/install.php", {
@@ -204,7 +217,7 @@ h2{margin:0 0 16px;font-size:18px;}
     .catch(function(e){
       setMsg("Error: " + (e.message || String(e)), true);
     });
-  });
+  }
 })();
 </script>
 </body></html>';
