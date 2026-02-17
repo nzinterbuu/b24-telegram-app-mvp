@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/b24.php';
+require_once __DIR__ . '/../lib/grey.php';
 
 // Grey inbound payload format may vary. We accept common shapes and nested message objects.
 function pick($a, array $keys) {
@@ -346,6 +347,87 @@ try {
   // tenant_id might be in payload for multi-tenant (for logging)
   $tenantId = pick($payload, ['tenant_id','tenantId','tenant','connection_id']);
 
+  // Step 1: If we have a chat_id (Telegram user ID) but no phone number, try to get phone from Grey API
+  $resolvedPhone = null;
+  if (!$phone && $chatId && $tenantId) {
+    try {
+      // Get API token for this tenant
+      $pdo = ensure_db();
+      $stmt = $pdo->prepare("SELECT api_token FROM user_settings WHERE tenant_id=? LIMIT 1");
+      $stmt->execute([$tenantId]);
+      $row = $stmt->fetch(PDO::FETCH_ASSOC);
+      $apiToken = $row ? ($row['api_token'] ?? null) : null;
+      
+      if ($apiToken) {
+        // Try to get user info from Grey API using chat_id
+        // Common endpoints: /users/{user_id}, /contacts/{user_id}, /chats/{chat_id}
+        // Try multiple possible endpoints
+        $endpoints = [
+          '/users/' . rawurlencode($chatId),
+          '/contacts/' . rawurlencode($chatId),
+          '/chats/' . rawurlencode($chatId),
+        ];
+        
+        foreach ($endpoints as $endpoint) {
+          try {
+            $userInfo = grey_call($tenantId, $apiToken, $endpoint, 'GET');
+            
+            // Try to extract phone number from response
+            // Check common fields: phone, phone_number, contact_phone, user.phone, etc.
+            $phoneFields = ['phone', 'phone_number', 'contact_phone', 'user_phone'];
+            foreach ($phoneFields as $field) {
+              if (isset($userInfo[$field]) && !empty($userInfo[$field])) {
+                $resolvedPhone = normalize_phone((string)$userInfo[$field]);
+                if ($resolvedPhone) {
+                  log_debug('Got phone from Grey API', ['chat_id' => $chatId, 'endpoint' => $endpoint, 'phone' => $resolvedPhone]);
+                  break 2; // Break out of both loops
+                }
+              }
+            }
+            
+            // Check nested user object
+            if (!$resolvedPhone && isset($userInfo['user']) && is_array($userInfo['user'])) {
+              foreach ($phoneFields as $field) {
+                if (isset($userInfo['user'][$field]) && !empty($userInfo['user'][$field])) {
+                  $resolvedPhone = normalize_phone((string)$userInfo['user'][$field]);
+                  if ($resolvedPhone) {
+                    log_debug('Got phone from Grey API (nested user)', ['chat_id' => $chatId, 'endpoint' => $endpoint, 'phone' => $resolvedPhone]);
+                    break 2;
+                  }
+                }
+              }
+            }
+            
+            // Check contact object
+            if (!$resolvedPhone && isset($userInfo['contact']) && is_array($userInfo['contact'])) {
+              foreach ($phoneFields as $field) {
+                if (isset($userInfo['contact'][$field]) && !empty($userInfo['contact'][$field])) {
+                  $resolvedPhone = normalize_phone((string)$userInfo['contact'][$field]);
+                  if ($resolvedPhone) {
+                    log_debug('Got phone from Grey API (contact)', ['chat_id' => $chatId, 'endpoint' => $endpoint, 'phone' => $resolvedPhone]);
+                    break 2;
+                  }
+                }
+              }
+            }
+          } catch (Throwable $e) {
+            // Endpoint doesn't exist or failed, try next one
+            log_debug('Grey API endpoint failed', ['endpoint' => $endpoint, 'error' => $e->getMessage()]);
+            continue;
+          }
+        }
+      }
+    } catch (Throwable $e) {
+      log_debug('Failed to get phone from Grey API', ['chat_id' => $chatId, 'error' => $e->getMessage()]);
+    }
+  }
+  
+  // Use resolved phone if found
+  if ($resolvedPhone) {
+    $phone = $resolvedPhone;
+    log_debug('Using phone resolved from Grey API', ['original_chat_id' => $chatId, 'resolved_phone' => $phone]);
+  }
+
   // Determine if $phone is actually a phone number or a Telegram user ID
   $isPhoneNumber = false;
   if ($phone) {
@@ -407,15 +489,68 @@ try {
     $contactId = (int)($addC['result'] ?? 0);
   }
 
-  $dealList = b24_call('crm.deal.list', [
-    'filter' => ['CONTACT_ID' => $contactId],
-    'select' => ['ID','ASSIGNED_BY_ID'],
-    'order' => ['ID' => 'DESC'],
-    'start' => 0
-  ]);
-  $dealId = !empty($dealList['result'][0]['ID']) ? (int)$dealList['result'][0]['ID'] : 0;
-  $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
-
+  // Step 2: If we have a phone number, try to find active deals by phone number first
+  $dealId = 0;
+  $assigned = 0;
+  $foundDealContactId = null;
+  
+  if ($isPhoneNumber && $phone) {
+    // Search for active deals that have this phone number as contact phone
+    // First, find all contacts with this phone number
+    $contactsWithPhone = b24_call('crm.contact.list', [
+      'filter' => ['PHONE' => $phone],
+      'select' => ['ID']
+    ]);
+    
+    if (!empty($contactsWithPhone['result']) && is_array($contactsWithPhone['result'])) {
+      $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactsWithPhone['result']);
+      
+      // Search for active deals linked to any of these contacts
+      // Filter by STAGE_SEMANTIC_ID != 'WON' and != 'LOST' to get active deals
+      $dealList = b24_call('crm.deal.list', [
+        'filter' => [
+          'CONTACT_ID' => $contactIds,
+          '!STAGE_SEMANTIC_ID' => ['WON', 'LOST'] // Exclude won/lost deals
+        ],
+        'select' => ['ID', 'ASSIGNED_BY_ID', 'CONTACT_ID', 'STAGE_SEMANTIC_ID'],
+        'order' => ['ID' => 'DESC'],
+        'start' => 0
+      ]);
+      
+      if (!empty($dealList['result']) && is_array($dealList['result'])) {
+        // Found active deal(s) - use the most recent one
+        $foundDeal = $dealList['result'][0];
+        $dealId = (int)$foundDeal['ID'];
+        $assigned = !empty($foundDeal['ASSIGNED_BY_ID']) ? (int)$foundDeal['ASSIGNED_BY_ID'] : 0;
+        $foundDealContactId = !empty($foundDeal['CONTACT_ID']) ? (int)$foundDeal['CONTACT_ID'] : null;
+        
+        // Use the contact from the found deal if available
+        if ($foundDealContactId && in_array($foundDealContactId, $contactIds)) {
+          $contactId = $foundDealContactId;
+          log_debug('Using contact from found deal', ['contact_id' => $contactId, 'deal_id' => $dealId]);
+        }
+        
+        log_debug('Found active deal by phone number', ['phone' => $phone, 'deal_id' => $dealId, 'contact_id' => $contactId, 'contact_ids' => $contactIds]);
+      }
+    }
+  }
+  
+  // If no active deal found by phone, try by contact ID
+  if (!$dealId) {
+    $dealList = b24_call('crm.deal.list', [
+      'filter' => [
+        'CONTACT_ID' => $contactId,
+        '!STAGE_SEMANTIC_ID' => ['WON', 'LOST'] // Only active deals
+      ],
+      'select' => ['ID','ASSIGNED_BY_ID'],
+      'order' => ['ID' => 'DESC'],
+      'start' => 0
+    ]);
+    $dealId = !empty($dealList['result'][0]['ID']) ? (int)$dealList['result'][0]['ID'] : 0;
+    $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
+  }
+  
+  // If still no deal found, create a new one
   if (!$dealId) {
     $dealTitle = $isPhoneNumber 
       ? 'Telegram: ' . $phone
@@ -428,6 +563,7 @@ try {
       ]
     ]);
     $dealId = (int)($addD['result'] ?? 0);
+    log_debug('Created new deal', ['phone' => $phone, 'contact_id' => $contactId, 'deal_id' => $dealId]);
   }
 
   // 1) Deal timeline — always add so the message is visible on the deal
