@@ -278,65 +278,64 @@ try {
     exit;
   }
 
-  // Enhanced error message with payload structure details
-  if (!$phone || $text === '') {
+  // Check if we have at least text and either phone or chatid
+  if ($text === '') {
     $errorDetails = [
       'received_keys' => array_keys($payload),
       'parsed_phone' => $phone,
       'parsed_chatid' => $chatId,
+      'parsed_text' => 'missing',
+    ];
+    
+    log_debug('parse_inbound_payload failed: no text', $errorDetails);
+    throw new Exception("Cannot parse inbound payload: message text is missing. Received keys: " . implode(', ', array_keys($payload)));
+  }
+  
+  // If no phone but we have chatid, use chatid as identifier (Telegram user ID)
+  // This handles cases where Grey API only provides Telegram user ID, not phone number
+  if (!$phone && $chatId) {
+    // Use chatid as the identifier - format it as a pseudo-phone for compatibility
+    // Store the original chatid separately for reference
+    $phone = $chatId; // Will be used as identifier, but we'll handle it specially
+    log_debug('Using Telegram user ID as identifier (no phone available)', ['chatid' => $chatId]);
+  }
+  
+  // Final check: we need either phone or chatid to proceed
+  if (!$phone && !$chatId) {
+    $errorDetails = [
+      'received_keys' => array_keys($payload),
+      'parsed_phone' => null,
+      'parsed_chatid' => null,
       'parsed_text' => $text ? '(found)' : '(missing)',
     ];
     
-    // Add nested structure info with actual values (for debugging)
     if (isset($payload['message']) && is_array($payload['message'])) {
       $errorDetails['message_keys'] = array_keys($payload['message']);
       $errorDetails['message_values'] = [];
-      
-      // Include actual values for key fields
       foreach (['sender_id', 'chat_id', 'sender_username', 'text', 'from', 'peer'] as $key) {
         if (isset($payload['message'][$key])) {
           $val = $payload['message'][$key];
           if (is_scalar($val)) {
             $errorDetails['message_values'][$key] = $val;
-          } elseif (is_array($val)) {
-            $errorDetails['message_values'][$key] = array_keys($val);
-          }
-        }
-      }
-      
-      if (isset($payload['message']['from'])) {
-        $errorDetails['message_from'] = is_array($payload['message']['from']) 
-          ? array_keys($payload['message']['from']) 
-          : gettype($payload['message']['from']);
-        if (is_array($payload['message']['from'])) {
-          $errorDetails['message_from_values'] = [];
-          foreach (['id', 'phone', 'username'] as $key) {
-            if (isset($payload['message']['from'][$key])) {
-              $errorDetails['message_from_values'][$key] = $payload['message']['from'][$key];
-            }
           }
         }
       }
     }
     
-    if (isset($payload['event']) && is_array($payload['event'])) {
-      $errorDetails['event_keys'] = array_keys($payload['event']);
-    }
+    log_debug('parse_inbound_payload failed: no phone or chatid', $errorDetails);
     
-    log_debug('parse_inbound_payload failed', $errorDetails);
-    
-    $errorMsg = "Cannot parse inbound payload (need phone + text). " .
+    $errorMsg = "Cannot parse inbound payload: need phone or chatid (Telegram user ID). " .
       "Received keys: " . implode(', ', array_keys($payload)) . ". " .
-      "Parsed phone: " . ($phone ?: 'null') . ", text: " . ($text ? '(found)' : 'null') . ". ";
+      "Parsed phone: null, chatid: null, text: " . ($text ? '(found)' : 'null');
     
     if (isset($payload['message']['sender_id'])) {
-      $errorMsg .= "sender_id: " . json_encode($payload['message']['sender_id']) . ". ";
+      $errorMsg .= ". sender_id: " . json_encode($payload['message']['sender_id']);
     }
     if (isset($payload['message']['chat_id'])) {
-      $errorMsg .= "chat_id: " . json_encode($payload['message']['chat_id']) . ". ";
+      $errorMsg .= ". chat_id: " . json_encode($payload['message']['chat_id']);
     }
     
-    throw new Exception($errorMsg . "Full payload structure: " . json_encode($errorDetails, JSON_UNESCAPED_UNICODE));
+    throw new Exception($errorMsg);
   }
 
   // Log if both phone and chatid are present (for debugging)
@@ -347,19 +346,63 @@ try {
   // tenant_id might be in payload for multi-tenant (for logging)
   $tenantId = pick($payload, ['tenant_id','tenantId','tenant','connection_id']);
 
-  // Find or create contact by phone (webhook mode, no auth needed)
-  $contactList = b24_call('crm.contact.list', [
-    'filter' => ['PHONE' => $phone],
-    'select' => ['ID','NAME']
-  ]);
-  $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
+  // Determine if $phone is actually a phone number or a Telegram user ID
+  $isPhoneNumber = false;
+  if ($phone) {
+    $phoneStr = (string)$phone;
+    $digitsOnly = preg_replace('/[^0-9]/', '', $phoneStr);
+    // Consider it a phone number if it starts with + and has 10+ digits, or has 11+ digits total
+    $isPhoneNumber = (strpos($phoneStr, '+') === 0 && strlen($digitsOnly) >= 10) || strlen($digitsOnly) >= 11;
+  }
+  
+  // Get sender username if available for better contact naming
+  $senderUsername = null;
+  if (isset($payload['message']['sender_username']) && !empty($payload['message']['sender_username'])) {
+    $senderUsername = trim((string)$payload['message']['sender_username']);
+  }
+
+  // Find or create contact by phone or Telegram user ID
+  $contactId = 0;
+  
+  if ($isPhoneNumber) {
+    // Real phone number - search by phone
+    $contactList = b24_call('crm.contact.list', [
+      'filter' => ['PHONE' => $phone],
+      'select' => ['ID','NAME']
+    ]);
+    $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
+  } else {
+    // Telegram user ID - search by name pattern or create new
+    // Try to find existing contact with this Telegram ID in name or notes
+    $searchName = 'Telegram ' . $phone;
+    $contactList = b24_call('crm.contact.list', [
+      'filter' => ['%NAME' => $searchName],
+      'select' => ['ID','NAME']
+    ]);
+    $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
+  }
 
   if (!$contactId) {
+    // Create new contact
+    $contactName = $senderUsername 
+      ? 'Telegram @' . $senderUsername . ' (' . $phone . ')'
+      : 'Telegram ' . $phone;
+    
+    $contactFields = [
+      'NAME' => $contactName
+    ];
+    
+    if ($isPhoneNumber) {
+      // Add phone number if it's a real phone
+      $contactFields['PHONE'] = [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']];
+    } else {
+      // For Telegram user IDs, store in COMMENTS or use a custom approach
+      // Store the Telegram ID in the name for now
+      $contactFields['COMMENTS'] = 'Telegram User ID: ' . $phone;
+    }
+    
     $addC = b24_call('crm.contact.add', [
-      'fields' => [
-        'NAME' => 'Telegram ' . preg_replace('/\+/', '', $phone),
-        'PHONE' => [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']]
-      ]
+      'fields' => $contactFields
     ]);
     $contactId = (int)($addC['result'] ?? 0);
   }
@@ -374,9 +417,13 @@ try {
   $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
 
   if (!$dealId) {
+    $dealTitle = $isPhoneNumber 
+      ? 'Telegram: ' . $phone
+      : 'Telegram User: ' . ($senderUsername ? '@' . $senderUsername : $phone);
+    
     $addD = b24_call('crm.deal.add', [
       'fields' => [
-        'TITLE' => 'Telegram: ' . $phone,
+        'TITLE' => $dealTitle,
         'CONTACT_ID' => $contactId
       ]
     ]);
@@ -384,11 +431,12 @@ try {
   }
 
   // 1) Deal timeline — always add so the message is visible on the deal
+  $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $phone);
   b24_call('crm.timeline.comment.add', [
     'fields' => [
       'ENTITY_TYPE' => 'deal',
       'ENTITY_ID' => $dealId,
-      'COMMENT' => "Telegram IN from {$phone}:\n{$text}"
+      'COMMENT' => "Telegram IN from {$fromLabel}:\n{$text}"
     ]
   ]);
 
@@ -407,9 +455,10 @@ try {
   }
   if ($notifyUserId) {
     try {
+      $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $phone);
       b24_call('im.notify', [
         'to' => $notifyUserId,
-        'message' => "Telegram from {$phone}:\n{$text}\n[Deal #{$dealId}]",
+        'message' => "Telegram from {$fromLabel}:\n{$text}\n[Deal #{$dealId}]",
         'message_out' => 'Y'
       ]);
     } catch (Throwable $e) {
@@ -427,22 +476,33 @@ try {
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
   if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
-      $ext = ol_map_get_or_create($portal, $lineId, (string)$tenantId, $phone);
-      $messageId = 'tg_' . $phone . '_' . time() . '_' . bin2hex(random_bytes(4));
-      $userName = 'Telegram ' . $phone;
+      // Use $phone as peer (it contains either phone number or Telegram user ID)
+      $peer = $phone; // This is the identifier to use for ol_map
+      $ext = ol_map_get_or_create($portal, $lineId, (string)$tenantId, $peer);
+      $messageId = 'tg_' . $peer . '_' . time() . '_' . bin2hex(random_bytes(4));
+      $userName = $senderUsername 
+        ? '@' . $senderUsername 
+        : ($isPhoneNumber ? 'Telegram ' . $phone : 'Telegram User ' . $phone);
       if (strlen($userName) > 25) $userName = substr($userName, 0, 22) . '…';
+      
+      $userData = [
+        'id' => $ext['external_user_id'],
+        'name' => $userName,
+        'last_name' => '',
+      ];
+      
+      // Only add phone field if it's a real phone number
+      if ($isPhoneNumber) {
+        $userData['phone'] = $phone;
+        $userData['skip_phone_validate'] = 'Y';
+      }
+      
       b24_call('imconnector.send.messages', [
         'CONNECTOR' => $connectorId,
         'LINE' => $lineId,
         'MESSAGES' => [
           [
-            'user' => [
-              'id' => $ext['external_user_id'],
-              'name' => $userName,
-              'last_name' => '',
-              'phone' => $phone,
-              'skip_phone_validate' => 'Y',
-            ],
+            'user' => $userData,
             'message' => [
               'id' => $messageId,
               'date' => (string)time(),
@@ -461,7 +521,9 @@ try {
   }
 
   $portalForLog = b24_get_first_portal() ?: 'unknown';
-  message_log_insert('in', $portalForLog, $tenantId ? (string)$tenantId : null, $phone, $text, $dealId, 'webhook', null);
+  // Log with peer identifier (phone or Telegram user ID)
+  $peerForLog = $phone ?: $chatId;
+  message_log_insert('in', $portalForLog, $tenantId ? (string)$tenantId : null, $peerForLog, $text, $dealId, 'webhook', null);
 
   json_response(['ok' => true, 'contact_id' => $contactId, 'deal_id' => $dealId]);
 
