@@ -23,32 +23,77 @@ function parse_inbound_payload(array $payload): array {
   $phone = null;
   $chatId = null;
   $text = '';
-  $try = [
-    $payload,
-    $payload['message'] ?? [],
-    $payload['event'] ?? [],
-    $payload['event']['message'] ?? [],
-    $payload['data'] ?? [],
-  ];
+  
+  // Build list of arrays to check, including nested structures
+  $try = [];
+  
+  // Top level
+  if (is_array($payload)) {
+    $try[] = $payload;
+  }
+  
+  // message object (common structure: { tenant_id, event, message: { from, text, ... } })
+  if (isset($payload['message']) && is_array($payload['message'])) {
+    $try[] = $payload['message'];
+    
+    // Check nested from object in message
+    if (isset($payload['message']['from']) && is_array($payload['message']['from'])) {
+      $try[] = $payload['message']['from'];
+    }
+  }
+  
+  // event object
+  if (isset($payload['event']) && is_array($payload['event'])) {
+    $try[] = $payload['event'];
+    
+    // Check nested message in event
+    if (isset($payload['event']['message']) && is_array($payload['event']['message'])) {
+      $try[] = $payload['event']['message'];
+      
+      // Check nested from in event.message
+      if (isset($payload['event']['message']['from']) && is_array($payload['event']['message']['from'])) {
+        $try[] = $payload['event']['message']['from'];
+      }
+    }
+  }
+  
+  // data object
+  if (isset($payload['data']) && is_array($payload['data'])) {
+    $try[] = $payload['data'];
+  }
   
   // First pass: prioritize phone number fields
   foreach ($try as $a) {
     if (!is_array($a)) continue;
+    
     // Try explicit phone number fields first
     $p = normalize_phone((string)pick($a, ['phone','from_phone','user_phone','sender_phone','contact_phone']));
-    if (!$p && isset($a['from']) && is_array($a['from'])) {
-      $p = normalize_phone((string)pick($a['from'], ['phone','phone_number','number']));
-    }
-    if (!$p && isset($a['from']) && is_string($a['from'])) {
-      $p = normalize_phone($a['from']);
-    }
-    // Also check 'peer' and 'from' fields - they might contain phone numbers
-    if (!$p) {
-      $peer = pick($a, ['peer','from','sender']);
-      if ($peer && is_string($peer)) {
-        $p = normalize_phone($peer);
+    
+    // Check nested 'from' object
+    if (!$p && isset($a['from'])) {
+      if (is_array($a['from'])) {
+        $p = normalize_phone((string)pick($a['from'], ['phone','phone_number','number']));
+        // Also check if 'from' itself is a phone-like string
+        if (!$p && isset($a['from']['id'])) {
+          $p = normalize_phone((string)$a['from']['id']);
+        }
+      } elseif (is_string($a['from'])) {
+        $p = normalize_phone($a['from']);
       }
     }
+    
+    // Check 'peer' field (common in Telegram APIs)
+    if (!$p) {
+      $peer = pick($a, ['peer','from','sender']);
+      if ($peer) {
+        if (is_string($peer)) {
+          $p = normalize_phone($peer);
+        } elseif (is_array($peer) && isset($peer['phone'])) {
+          $p = normalize_phone((string)$peer['phone']);
+        }
+      }
+    }
+    
     if ($p) {
       $phone = $phone ?? $p;
       break; // Found phone number, prioritize it
@@ -59,37 +104,71 @@ function parse_inbound_payload(array $payload): array {
   if (!$phone) {
     foreach ($try as $a) {
       if (!is_array($a)) continue;
+      
       $cid = pick($a, ['peer_id','sender_id','chat_id','user_id']);
-      if ($cid && is_string($cid)) {
-        $p = normalize_phone((string)$cid);
-        if ($p) {
-          $chatId = $chatId ?? $cid;
-          $phone = $phone ?? $p;
-          break;
-        }
-      }
-      if (!$phone && isset($a['from']) && is_array($a['from'])) {
-        $cid = pick($a['from'], ['id','username']);
-        if ($cid && is_string($cid)) {
+      if ($cid) {
+        if (is_string($cid)) {
           $p = normalize_phone((string)$cid);
           if ($p) {
             $chatId = $chatId ?? $cid;
             $phone = $phone ?? $p;
             break;
           }
+        } elseif (is_numeric($cid)) {
+          // Numeric IDs might be Telegram user IDs, not phone numbers
+          // Only use if it looks like a phone number (starts with + or has 10+ digits)
+          $cidStr = (string)$cid;
+          if (strlen($cidStr) >= 10 && (preg_match('/^\+?\d{10,}$/', $cidStr))) {
+            $p = normalize_phone($cidStr);
+            if ($p) {
+              $chatId = $chatId ?? $cidStr;
+              $phone = $phone ?? $p;
+              break;
+            }
+          }
+        }
+      }
+      
+      // Check nested from.id
+      if (!$phone && isset($a['from']) && is_array($a['from'])) {
+        $cid = pick($a['from'], ['id','username']);
+        if ($cid) {
+          if (is_string($cid)) {
+            $p = normalize_phone((string)$cid);
+            if ($p) {
+              $chatId = $chatId ?? $cid;
+              $phone = $phone ?? $p;
+              break;
+            }
+          }
         }
       }
     }
   }
   
-  // Extract text
+  // Extract text - check all nested structures
   foreach ($try as $a) {
     if (!is_array($a)) continue;
-    $tRaw = pick($a, ['text','message','body','content','msg','message_text','data']);
-    $t = is_string($tRaw) ? trim($tRaw) : '';
-    if ($t !== '') {
-      $text = $text !== '' ? $text : $t;
-      break;
+    
+    // Try common text fields
+    $tRaw = pick($a, ['text','message','body','content','msg','message_text']);
+    
+    // If found a non-empty string, use it
+    if ($tRaw && is_string($tRaw)) {
+      $t = trim($tRaw);
+      if ($t !== '') {
+        $text = $text !== '' ? $text : $t;
+        break;
+      }
+    }
+    
+    // Check nested message.text
+    if (isset($a['message']) && is_string($a['message'])) {
+      $t = trim($a['message']);
+      if ($t !== '') {
+        $text = $text !== '' ? $text : $t;
+        break;
+      }
     }
   }
   
@@ -115,8 +194,37 @@ try {
     exit;
   }
 
+  // Enhanced error message with payload structure details
   if (!$phone || $text === '') {
-    throw new Exception("Cannot parse inbound payload (need phone + text). Received keys: " . implode(', ', array_keys($payload)));
+    $errorDetails = [
+      'received_keys' => array_keys($payload),
+      'parsed_phone' => $phone,
+      'parsed_chatid' => $chatId,
+      'parsed_text' => $text ? '(found)' : '(missing)',
+    ];
+    
+    // Add nested structure info
+    if (isset($payload['message']) && is_array($payload['message'])) {
+      $errorDetails['message_keys'] = array_keys($payload['message']);
+      if (isset($payload['message']['from'])) {
+        $errorDetails['message_from'] = is_array($payload['message']['from']) 
+          ? array_keys($payload['message']['from']) 
+          : gettype($payload['message']['from']);
+      }
+    }
+    
+    if (isset($payload['event']) && is_array($payload['event'])) {
+      $errorDetails['event_keys'] = array_keys($payload['event']);
+    }
+    
+    log_debug('parse_inbound_payload failed', $errorDetails);
+    
+    throw new Exception(
+      "Cannot parse inbound payload (need phone + text). " .
+      "Received keys: " . implode(', ', array_keys($payload)) . ". " .
+      "Parsed phone: " . ($phone ?: 'null') . ", text: " . ($text ? '(found)' : 'null') . ". " .
+      "Payload structure: " . json_encode($errorDetails, JSON_UNESCAPED_UNICODE)
+    );
   }
 
   // Log if both phone and chatid are present (for debugging)
