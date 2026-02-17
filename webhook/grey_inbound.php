@@ -443,67 +443,25 @@ try {
     $senderUsername = trim((string)$payload['message']['sender_username']);
   }
 
-  // Find or create contact by phone or Telegram user ID
-  $contactId = 0;
-  
-  if ($isPhoneNumber) {
-    // Real phone number - search by phone
-    $contactList = b24_call('crm.contact.list', [
-      'filter' => ['PHONE' => $phone],
-      'select' => ['ID','NAME']
-    ]);
-    $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
-  } else {
-    // Telegram user ID - search by name pattern or create new
-    // Try to find existing contact with this Telegram ID in name or notes
-    $searchName = 'Telegram ' . $phone;
-    $contactList = b24_call('crm.contact.list', [
-      'filter' => ['%NAME' => $searchName],
-      'select' => ['ID','NAME']
-    ]);
-    $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
-  }
-
-  if (!$contactId) {
-    // Create new contact
-    $contactName = $senderUsername 
-      ? 'Telegram @' . $senderUsername . ' (' . $phone . ')'
-      : 'Telegram ' . $phone;
-    
-    $contactFields = [
-      'NAME' => $contactName
-    ];
-    
-    if ($isPhoneNumber) {
-      // Add phone number if it's a real phone
-      $contactFields['PHONE'] = [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']];
-    } else {
-      // For Telegram user IDs, store in COMMENTS or use a custom approach
-      // Store the Telegram ID in the name for now
-      $contactFields['COMMENTS'] = 'Telegram User ID: ' . $phone;
-    }
-    
-    $addC = b24_call('crm.contact.add', [
-      'fields' => $contactFields
-    ]);
-    $contactId = (int)($addC['result'] ?? 0);
-  }
-
-  // Step 2: If we have a phone number, try to find active deals by phone number first
+  // STEP 2: If we have a phone number, FIRST try to find active deals by phone number
+  // This is the priority - find existing deals before creating new contacts/deals
   $dealId = 0;
   $assigned = 0;
-  $foundDealContactId = null;
+  $contactId = 0;
   
   if ($isPhoneNumber && $phone) {
-    // Search for active deals that have this phone number as contact phone
-    // First, find all contacts with this phone number
+    log_debug('Searching for deals by phone number', ['phone' => $phone]);
+    
+    // Find all contacts with this phone number
     $contactsWithPhone = b24_call('crm.contact.list', [
       'filter' => ['PHONE' => $phone],
-      'select' => ['ID']
+      'select' => ['ID', 'NAME']
     ]);
     
     if (!empty($contactsWithPhone['result']) && is_array($contactsWithPhone['result'])) {
       $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactsWithPhone['result']);
+      
+      log_debug('Found contacts with phone number', ['phone' => $phone, 'contact_ids' => $contactIds]);
       
       // Search for active deals linked to any of these contacts
       // Filter by STAGE_SEMANTIC_ID != 'WON' and != 'LOST' to get active deals
@@ -524,19 +482,70 @@ try {
         $assigned = !empty($foundDeal['ASSIGNED_BY_ID']) ? (int)$foundDeal['ASSIGNED_BY_ID'] : 0;
         $foundDealContactId = !empty($foundDeal['CONTACT_ID']) ? (int)$foundDeal['CONTACT_ID'] : null;
         
-        // Use the contact from the found deal if available
+        // Use the contact from the found deal
         if ($foundDealContactId && in_array($foundDealContactId, $contactIds)) {
           $contactId = $foundDealContactId;
-          log_debug('Using contact from found deal', ['contact_id' => $contactId, 'deal_id' => $dealId]);
+        } else {
+          // Use the first contact with this phone
+          $contactId = $contactIds[0];
         }
         
-        log_debug('Found active deal by phone number', ['phone' => $phone, 'deal_id' => $dealId, 'contact_id' => $contactId, 'contact_ids' => $contactIds]);
+        log_debug('Found active deal by phone number', ['phone' => $phone, 'deal_id' => $dealId, 'contact_id' => $contactId]);
+      } else {
+        log_debug('No active deals found for phone number', ['phone' => $phone, 'contact_ids' => $contactIds]);
+        // Use the first contact with this phone (contact exists but no active deal)
+        $contactId = $contactIds[0];
       }
     }
   }
   
-  // If no active deal found by phone, try by contact ID
-  if (!$dealId) {
+  // STEP 3: If no deal found by phone number, find or create contact
+  if (!$contactId) {
+    if ($isPhoneNumber) {
+      // Real phone number - search by phone
+      $contactList = b24_call('crm.contact.list', [
+        'filter' => ['PHONE' => $phone],
+        'select' => ['ID','NAME']
+      ]);
+      $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
+    } else {
+      // Telegram user ID - search by name pattern
+      $searchName = 'Telegram ' . $phone;
+      $contactList = b24_call('crm.contact.list', [
+        'filter' => ['%NAME' => $searchName],
+        'select' => ['ID','NAME']
+      ]);
+      $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
+    }
+
+    if (!$contactId) {
+      // Create new contact
+      $contactName = $senderUsername 
+        ? 'Telegram @' . $senderUsername . ' (' . $phone . ')'
+        : 'Telegram ' . $phone;
+      
+      $contactFields = [
+        'NAME' => $contactName
+      ];
+      
+      if ($isPhoneNumber) {
+        // Add phone number if it's a real phone
+        $contactFields['PHONE'] = [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']];
+      } else {
+        // For Telegram user IDs, store in COMMENTS
+        $contactFields['COMMENTS'] = 'Telegram User ID: ' . $phone;
+      }
+      
+      $addC = b24_call('crm.contact.add', [
+        'fields' => $contactFields
+      ]);
+      $contactId = (int)($addC['result'] ?? 0);
+      log_debug('Created new contact', ['phone' => $phone, 'contact_id' => $contactId]);
+    }
+  }
+  
+  // STEP 4: If still no deal found, try by contact ID (for cases where phone wasn't available initially)
+  if (!$dealId && $contactId) {
     $dealList = b24_call('crm.deal.list', [
       'filter' => [
         'CONTACT_ID' => $contactId,
@@ -548,9 +557,13 @@ try {
     ]);
     $dealId = !empty($dealList['result'][0]['ID']) ? (int)$dealList['result'][0]['ID'] : 0;
     $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
+    
+    if ($dealId) {
+      log_debug('Found active deal by contact ID', ['contact_id' => $contactId, 'deal_id' => $dealId]);
+    }
   }
   
-  // If still no deal found, create a new one
+  // STEP 5: If still no deal found, create a new one
   if (!$dealId) {
     $dealTitle = $isPhoneNumber 
       ? 'Telegram: ' . $phone
