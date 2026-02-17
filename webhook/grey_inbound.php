@@ -17,9 +17,11 @@ function normalize_phone(?string $phone): ?string {
   return $p;
 }
 
-/** Extract phone and text from payload (top-level or nested in message/event). Grey may send: tenant_id, event, message (with message containing from/peer and text). */
+/** Extract phone and text from payload (top-level or nested in message/event). Grey may send: tenant_id, event, message (with message containing from/peer and text). 
+ * Prioritizes phone number fields over chatid fields - if both are present, uses phone number for deal creation. */
 function parse_inbound_payload(array $payload): array {
   $phone = null;
+  $chatId = null;
   $text = '';
   $try = [
     $payload,
@@ -28,24 +30,70 @@ function parse_inbound_payload(array $payload): array {
     $payload['event']['message'] ?? [],
     $payload['data'] ?? [],
   ];
+  
+  // First pass: prioritize phone number fields
   foreach ($try as $a) {
     if (!is_array($a)) continue;
-    $p = normalize_phone((string)pick($a, ['phone','from_phone','from','peer','sender','user_phone','sender_phone','contact_phone','peer_id','sender_id']));
+    // Try explicit phone number fields first
+    $p = normalize_phone((string)pick($a, ['phone','from_phone','user_phone','sender_phone','contact_phone']));
     if (!$p && isset($a['from']) && is_array($a['from'])) {
-      $p = normalize_phone((string)pick($a['from'], ['phone','phone_number','number','id','username']));
+      $p = normalize_phone((string)pick($a['from'], ['phone','phone_number','number']));
     }
     if (!$p && isset($a['from']) && is_string($a['from'])) {
       $p = normalize_phone($a['from']);
     }
-    if (!$p && isset($a['peer_id'])) {
-      $p = normalize_phone((string)$a['peer_id']);
+    // Also check 'peer' and 'from' fields - they might contain phone numbers
+    if (!$p) {
+      $peer = pick($a, ['peer','from','sender']);
+      if ($peer && is_string($peer)) {
+        $p = normalize_phone($peer);
+      }
     }
+    if ($p) {
+      $phone = $phone ?? $p;
+      break; // Found phone number, prioritize it
+    }
+  }
+  
+  // Second pass: if no phone found, try chatid fields as fallback
+  if (!$phone) {
+    foreach ($try as $a) {
+      if (!is_array($a)) continue;
+      $cid = pick($a, ['peer_id','sender_id','chat_id','user_id']);
+      if ($cid && is_string($cid)) {
+        $p = normalize_phone((string)$cid);
+        if ($p) {
+          $chatId = $chatId ?? $cid;
+          $phone = $phone ?? $p;
+          break;
+        }
+      }
+      if (!$phone && isset($a['from']) && is_array($a['from'])) {
+        $cid = pick($a['from'], ['id','username']);
+        if ($cid && is_string($cid)) {
+          $p = normalize_phone((string)$cid);
+          if ($p) {
+            $chatId = $chatId ?? $cid;
+            $phone = $phone ?? $p;
+            break;
+          }
+        }
+      }
+    }
+  }
+  
+  // Extract text
+  foreach ($try as $a) {
+    if (!is_array($a)) continue;
     $tRaw = pick($a, ['text','message','body','content','msg','message_text','data']);
     $t = is_string($tRaw) ? trim($tRaw) : '';
-    if ($p) $phone = $phone ?? $p;
-    if ($t !== '') $text = $text !== '' ? $text : $t;
+    if ($t !== '') {
+      $text = $text !== '' ? $text : $t;
+      break;
+    }
   }
-  return ['phone' => $phone, 'text' => $text];
+  
+  return ['phone' => $phone, 'chatid' => $chatId, 'text' => $text];
 }
 
 try {
@@ -56,6 +104,7 @@ try {
 
   $parsed = parse_inbound_payload($payload);
   $phone = $parsed['phone'];
+  $chatId = $parsed['chatid'] ?? null;
   $text = $parsed['text'];
 
   // Check webhook is configured (required for inbound)
@@ -68,6 +117,11 @@ try {
 
   if (!$phone || $text === '') {
     throw new Exception("Cannot parse inbound payload (need phone + text). Received keys: " . implode(', ', array_keys($payload)));
+  }
+
+  // Log if both phone and chatid are present (for debugging)
+  if (cfg('DEBUG') && $chatId && $phone) {
+    log_debug('inbound: phone prioritized over chatid', ['phone' => $phone, 'chatid' => $chatId]);
   }
 
   // tenant_id might be in payload for multi-tenant (for logging)
