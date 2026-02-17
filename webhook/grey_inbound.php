@@ -100,18 +100,102 @@ function parse_inbound_payload(array $payload): array {
     }
   }
   
-  // Second pass: if no phone found, try chatid fields as fallback
+  // Second pass: check sender_id and chat_id from message object (they might be phone numbers)
+  // This handles structure like: { message: { sender_id: "+123...", chat_id: "...", text: "..." } }
+  if (!$phone && isset($payload['message']) && is_array($payload['message'])) {
+    $msg = $payload['message'];
+    
+    // Check sender_id - might be a phone number
+    if (isset($msg['sender_id'])) {
+      $senderId = $msg['sender_id'];
+      $senderIdStr = is_string($senderId) ? $senderId : (is_numeric($senderId) ? (string)$senderId : null);
+      
+      if ($senderIdStr !== null) {
+        // Try to normalize as phone number
+        $p = normalize_phone($senderIdStr);
+        
+        if ($p) {
+          // Check if it looks like a phone number (not just a numeric Telegram ID)
+          // Telegram user IDs are typically 8-10 digits, phone numbers are 10+ digits
+          // If it starts with + or has 11+ digits (after removing non-digits), it's likely a phone number
+          $digitsOnly = preg_replace('/[^0-9]/', '', $senderIdStr);
+          $digitCount = strlen($digitsOnly);
+          
+          if (strpos($senderIdStr, '+') === 0 || $digitCount >= 11) {
+            // Looks like a phone number
+            $phone = $p;
+            $chatId = $senderIdStr;
+          } elseif (!$phone && $digitCount >= 10) {
+            // Might be a phone number (10+ digits), use it
+            $phone = $p;
+            $chatId = $senderIdStr;
+          } else {
+            // Probably a Telegram user ID, store as chatid only
+            $chatId = $senderIdStr;
+          }
+        } else {
+          // Couldn't normalize as phone, but store as chatid
+          $chatId = $senderIdStr;
+        }
+      }
+    }
+    
+    // Check chat_id - might be a phone number
+    if (!$phone && isset($msg['chat_id'])) {
+      $chatIdVal = $msg['chat_id'];
+      $chatIdValStr = is_string($chatIdVal) ? $chatIdVal : (is_numeric($chatIdVal) ? (string)$chatIdVal : null);
+      
+      if ($chatIdValStr !== null) {
+        $p = normalize_phone($chatIdValStr);
+        
+        if ($p) {
+          $digitsOnly = preg_replace('/[^0-9]/', '', $chatIdValStr);
+          $digitCount = strlen($digitsOnly);
+          
+          if (strpos($chatIdValStr, '+') === 0 || $digitCount >= 11) {
+            // Looks like a phone number
+            $phone = $p;
+            if (!$chatId) $chatId = $chatIdValStr;
+          } elseif (!$phone && $digitCount >= 10) {
+            // Might be a phone number, use it
+            $phone = $p;
+            if (!$chatId) $chatId = $chatIdValStr;
+          } else {
+            // Probably a Telegram chat ID, store as chatid only
+            if (!$chatId) $chatId = $chatIdValStr;
+          }
+        } else {
+          if (!$chatId) $chatId = $chatIdValStr;
+        }
+      }
+    }
+    
+    // If we still don't have a phone but have a chatid, try using chatid as phone (fallback)
+    // This handles cases where Grey API sends phone numbers in chatid/sender_id fields
+    if (!$phone && $chatId) {
+      $p = normalize_phone($chatId);
+      if ($p) {
+        // Only use if it has enough digits to be a phone number
+        $digitsOnly = preg_replace('/[^0-9]/', '', $chatId);
+        if (strlen($digitsOnly) >= 10) {
+          $phone = $p;
+        }
+      }
+    }
+  }
+  
+  // Third pass: if still no phone found, try other chatid fields as fallback
   if (!$phone) {
     foreach ($try as $a) {
       if (!is_array($a)) continue;
       
       $cid = pick($a, ['peer_id','sender_id','chat_id','user_id']);
-      if ($cid) {
+      if ($cid && !$phone) {
         if (is_string($cid)) {
           $p = normalize_phone((string)$cid);
           if ($p) {
             $chatId = $chatId ?? $cid;
-            $phone = $phone ?? $p;
+            $phone = $p;
             break;
           }
         } elseif (is_numeric($cid)) {
@@ -122,7 +206,7 @@ function parse_inbound_payload(array $payload): array {
             $p = normalize_phone($cidStr);
             if ($p) {
               $chatId = $chatId ?? $cidStr;
-              $phone = $phone ?? $p;
+              $phone = $p;
               break;
             }
           }
@@ -137,7 +221,7 @@ function parse_inbound_payload(array $payload): array {
             $p = normalize_phone((string)$cid);
             if ($p) {
               $chatId = $chatId ?? $cid;
-              $phone = $phone ?? $p;
+              $phone = $p;
               break;
             }
           }
@@ -203,13 +287,35 @@ try {
       'parsed_text' => $text ? '(found)' : '(missing)',
     ];
     
-    // Add nested structure info
+    // Add nested structure info with actual values (for debugging)
     if (isset($payload['message']) && is_array($payload['message'])) {
       $errorDetails['message_keys'] = array_keys($payload['message']);
+      $errorDetails['message_values'] = [];
+      
+      // Include actual values for key fields
+      foreach (['sender_id', 'chat_id', 'sender_username', 'text', 'from', 'peer'] as $key) {
+        if (isset($payload['message'][$key])) {
+          $val = $payload['message'][$key];
+          if (is_scalar($val)) {
+            $errorDetails['message_values'][$key] = $val;
+          } elseif (is_array($val)) {
+            $errorDetails['message_values'][$key] = array_keys($val);
+          }
+        }
+      }
+      
       if (isset($payload['message']['from'])) {
         $errorDetails['message_from'] = is_array($payload['message']['from']) 
           ? array_keys($payload['message']['from']) 
           : gettype($payload['message']['from']);
+        if (is_array($payload['message']['from'])) {
+          $errorDetails['message_from_values'] = [];
+          foreach (['id', 'phone', 'username'] as $key) {
+            if (isset($payload['message']['from'][$key])) {
+              $errorDetails['message_from_values'][$key] = $payload['message']['from'][$key];
+            }
+          }
+        }
       }
     }
     
@@ -219,12 +325,18 @@ try {
     
     log_debug('parse_inbound_payload failed', $errorDetails);
     
-    throw new Exception(
-      "Cannot parse inbound payload (need phone + text). " .
+    $errorMsg = "Cannot parse inbound payload (need phone + text). " .
       "Received keys: " . implode(', ', array_keys($payload)) . ". " .
-      "Parsed phone: " . ($phone ?: 'null') . ", text: " . ($text ? '(found)' : 'null') . ". " .
-      "Payload structure: " . json_encode($errorDetails, JSON_UNESCAPED_UNICODE)
-    );
+      "Parsed phone: " . ($phone ?: 'null') . ", text: " . ($text ? '(found)' : 'null') . ". ";
+    
+    if (isset($payload['message']['sender_id'])) {
+      $errorMsg .= "sender_id: " . json_encode($payload['message']['sender_id']) . ". ";
+    }
+    if (isset($payload['message']['chat_id'])) {
+      $errorMsg .= "chat_id: " . json_encode($payload['message']['chat_id']) . ". ";
+    }
+    
+    throw new Exception($errorMsg . "Full payload structure: " . json_encode($errorDetails, JSON_UNESCAPED_UNICODE));
   }
 
   // Log if both phone and chatid are present (for debugging)
