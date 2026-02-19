@@ -99,6 +99,13 @@ function log_debug(string $msg, array $ctx=[]): void {
   @file_put_contents(__DIR__ . '/../logs/app.log', $line, FILE_APPEND);
 }
 
+/** Always log inbound callback payload to server log (logs/app.log). No DEBUG flag required. */
+function log_inbound_payload($payload): void {
+  $line = '[' . gmdate('c') . '] INBOUND CALLBACK PAYLOAD ' . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
+  @mkdir(__DIR__ . '/../logs', 0777, true);
+  @file_put_contents(__DIR__ . '/../logs/app.log', $line, FILE_APPEND);
+}
+
 /** Get Open Line ID for portal (from DB or config fallback). */
 function get_portal_line_id(string $portal): ?string {
   $pdo = ensure_db();

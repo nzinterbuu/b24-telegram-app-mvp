@@ -275,9 +275,9 @@ function parse_inbound_payload(array $payload): array {
 
 try {
   $payload = read_json();
-  if (cfg('DEBUG')) {
-    log_debug('inbound payload', ['payload' => $payload]);
-  }
+
+  // Always log the callback payload to server logs (logs/app.log)
+  log_inbound_payload($payload);
 
   $parsed = parse_inbound_payload($payload);
   $phone = $parsed['phone'];
