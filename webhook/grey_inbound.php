@@ -437,22 +437,45 @@ try {
     $isPhoneNumber = (strpos($phoneStr, '+') === 0 && strlen($digitsOnly) >= 10) || strlen($digitsOnly) >= 11;
   }
   
-  // Get sender username if available for better contact naming
+  // Get sender username from callback payload (for deal lookup by username)
   $senderUsername = null;
-  if (isset($payload['message']['sender_username']) && !empty($payload['message']['sender_username'])) {
+  if (isset($payload['message']['sender_username']) && $payload['message']['sender_username'] !== '' && $payload['message']['sender_username'] !== null) {
     $senderUsername = trim((string)$payload['message']['sender_username']);
   }
+  
+  // Get sender_id from callback payload (for deal lookup by sender id)
+  $senderId = $chatId ? (string)$chatId : null;
 
-  // STEP 2: If we have a phone number, FIRST try to find active deals by phone number
-  // This is the priority - find existing deals before creating new contacts/deals
+  // Helper: find active deal by contact IDs (returns [dealId, assigned, contactId] or null)
+  $find_active_deal_by_contact_ids = function(array $contactIds) use (&$contactId) {
+    if (empty($contactIds)) return null;
+    $dealList = b24_call('crm.deal.list', [
+      'filter' => [
+        'CONTACT_ID' => $contactIds,
+        '!STAGE_SEMANTIC_ID' => ['WON', 'LOST']
+      ],
+      'select' => ['ID', 'ASSIGNED_BY_ID', 'CONTACT_ID'],
+      'order' => ['ID' => 'DESC'],
+      'start' => 0
+    ]);
+    if (empty($dealList['result']) || !is_array($dealList['result'])) return null;
+    $foundDeal = $dealList['result'][0];
+    $dealId = (int)$foundDeal['ID'];
+    $assigned = !empty($foundDeal['ASSIGNED_BY_ID']) ? (int)$foundDeal['ASSIGNED_BY_ID'] : 0;
+    $contactId = !empty($foundDeal['CONTACT_ID']) && in_array((int)$foundDeal['CONTACT_ID'], $contactIds)
+      ? (int)$foundDeal['CONTACT_ID'] : (int)$contactIds[0];
+    return ['dealId' => $dealId, 'assigned' => $assigned, 'contactId' => $contactId];
+  };
+
   $dealId = 0;
   $assigned = 0;
   $contactId = 0;
-  
+  $dealFoundBy = null;
+
+  // ——— 1) PHONE: If phone in callback payload, find deals containing this phone number ———
   if ($isPhoneNumber && $phone) {
-    log_debug('Searching for deals by phone number', ['phone' => $phone]);
+    log_debug('Deal lookup step 1: by phone number', ['phone' => $phone]);
     
-    // Find all contacts with this phone number
     $contactsWithPhone = b24_call('crm.contact.list', [
       'filter' => ['PHONE' => $phone],
       'select' => ['ID', 'NAME']
@@ -460,57 +483,98 @@ try {
     
     if (!empty($contactsWithPhone['result']) && is_array($contactsWithPhone['result'])) {
       $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactsWithPhone['result']);
-      
-      log_debug('Found contacts with phone number', ['phone' => $phone, 'contact_ids' => $contactIds]);
-      
-      // Search for active deals linked to any of these contacts
-      // Filter by STAGE_SEMANTIC_ID != 'WON' and != 'LOST' to get active deals
-      $dealList = b24_call('crm.deal.list', [
-        'filter' => [
-          'CONTACT_ID' => $contactIds,
-          '!STAGE_SEMANTIC_ID' => ['WON', 'LOST'] // Exclude won/lost deals
-        ],
-        'select' => ['ID', 'ASSIGNED_BY_ID', 'CONTACT_ID', 'STAGE_SEMANTIC_ID'],
-        'order' => ['ID' => 'DESC'],
-        'start' => 0
-      ]);
-      
-      if (!empty($dealList['result']) && is_array($dealList['result'])) {
-        // Found active deal(s) - use the most recent one
-        $foundDeal = $dealList['result'][0];
-        $dealId = (int)$foundDeal['ID'];
-        $assigned = !empty($foundDeal['ASSIGNED_BY_ID']) ? (int)$foundDeal['ASSIGNED_BY_ID'] : 0;
-        $foundDealContactId = !empty($foundDeal['CONTACT_ID']) ? (int)$foundDeal['CONTACT_ID'] : null;
-        
-        // Use the contact from the found deal
-        if ($foundDealContactId && in_array($foundDealContactId, $contactIds)) {
-          $contactId = $foundDealContactId;
-        } else {
-          // Use the first contact with this phone
-          $contactId = $contactIds[0];
-        }
-        
-        log_debug('Found active deal by phone number', ['phone' => $phone, 'deal_id' => $dealId, 'contact_id' => $contactId]);
+      $result = $find_active_deal_by_contact_ids($contactIds);
+      if ($result) {
+        $dealId = $result['dealId'];
+        $assigned = $result['assigned'];
+        $contactId = $result['contactId'];
+        $dealFoundBy = 'phone';
+        log_debug('Deal found by phone number', ['phone' => $phone, 'deal_id' => $dealId, 'contact_id' => $contactId]);
       } else {
-        log_debug('No active deals found for phone number', ['phone' => $phone, 'contact_ids' => $contactIds]);
-        // Use the first contact with this phone (contact exists but no active deal)
         $contactId = $contactIds[0];
+        log_debug('Contacts with phone found but no active deal', ['phone' => $phone, 'contact_id' => $contactId]);
       }
     }
   }
-  
-  // STEP 3: If no deal found by phone number, find or create contact
+
+  // ——— 2) USERNAME: If no deal yet and username in payload, find deals containing this username ———
+  if (!$dealId && $senderUsername !== null && $senderUsername !== '') {
+    log_debug('Deal lookup step 2: by username', ['username' => $senderUsername]);
+    
+    // Search contacts by NAME containing @username or "username"
+    $usernamePattern = (strpos($senderUsername, '@') === 0) ? $senderUsername : '@' . $senderUsername;
+    $contactList = b24_call('crm.contact.list', [
+      'filter' => ['%NAME' => $usernamePattern],
+      'select' => ['ID', 'NAME']
+    ]);
+    
+    if (empty($contactList['result']) || !is_array($contactList['result'])) {
+      // Try without @
+      $contactList = b24_call('crm.contact.list', [
+        'filter' => ['%NAME' => $senderUsername],
+        'select' => ['ID', 'NAME']
+      ]);
+    }
+    
+    if (!empty($contactList['result']) && is_array($contactList['result'])) {
+      $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactList['result']);
+      $result = $find_active_deal_by_contact_ids($contactIds);
+      if ($result) {
+        $dealId = $result['dealId'];
+        $assigned = $result['assigned'];
+        $contactId = $result['contactId'];
+        $dealFoundBy = 'username';
+        log_debug('Deal found by username', ['username' => $senderUsername, 'deal_id' => $dealId, 'contact_id' => $contactId]);
+      } elseif (!$contactId) {
+        $contactId = (int)$contactList['result'][0]['ID'];
+        log_debug('Contacts with username found but no active deal', ['username' => $senderUsername, 'contact_id' => $contactId]);
+      }
+    }
+  }
+
+  // ——— 3) SENDER_ID: If no deal yet and sender_id in payload, find deals containing this sender id ———
+  if (!$dealId && $senderId !== null && $senderId !== '') {
+    log_debug('Deal lookup step 3: by sender_id', ['sender_id' => $senderId]);
+    
+    // Search contacts by COMMENTS containing "Telegram User ID: sender_id" or NAME containing sender_id
+    $contactList = b24_call('crm.contact.list', [
+      'filter' => ['%COMMENTS' => $senderId],
+      'select' => ['ID', 'NAME', 'COMMENTS']
+    ]);
+    
+    if (empty($contactList['result']) || !is_array($contactList['result'])) {
+      $contactList = b24_call('crm.contact.list', [
+        'filter' => ['%NAME' => $senderId],
+        'select' => ['ID', 'NAME']
+      ]);
+    }
+    
+    if (!empty($contactList['result']) && is_array($contactList['result'])) {
+      $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactList['result']);
+      $result = $find_active_deal_by_contact_ids($contactIds);
+      if ($result) {
+        $dealId = $result['dealId'];
+        $assigned = $result['assigned'];
+        $contactId = $result['contactId'];
+        $dealFoundBy = 'sender_id';
+        log_debug('Deal found by sender_id', ['sender_id' => $senderId, 'deal_id' => $dealId, 'contact_id' => $contactId]);
+      } elseif (!$contactId) {
+        $contactId = (int)$contactList['result'][0]['ID'];
+        log_debug('Contacts with sender_id found but no active deal', ['sender_id' => $senderId, 'contact_id' => $contactId]);
+      }
+    }
+  }
+
+  // ——— Find or create contact if we still have no contact ———
   if (!$contactId) {
-    if ($isPhoneNumber) {
-      // Real phone number - search by phone
+    if ($isPhoneNumber && $phone) {
       $contactList = b24_call('crm.contact.list', [
         'filter' => ['PHONE' => $phone],
         'select' => ['ID','NAME']
       ]);
       $contactId = !empty($contactList['result'][0]['ID']) ? (int)$contactList['result'][0]['ID'] : 0;
     } else {
-      // Telegram user ID - search by name pattern
-      $searchName = 'Telegram ' . $phone;
+      $searchName = 'Telegram ' . ($phone ?: $senderId ?: '');
       $contactList = b24_call('crm.contact.list', [
         'filter' => ['%NAME' => $searchName],
         'select' => ['ID','NAME']
@@ -519,37 +583,29 @@ try {
     }
 
     if (!$contactId) {
-      // Create new contact
-      $contactName = $senderUsername 
-        ? 'Telegram @' . $senderUsername . ' (' . $phone . ')'
-        : 'Telegram ' . $phone;
+      $contactName = $senderUsername
+        ? 'Telegram @' . $senderUsername . ' (' . ($phone ?: $senderId ?: '') . ')'
+        : 'Telegram ' . ($phone ?: $senderId ?: '');
       
-      $contactFields = [
-        'NAME' => $contactName
-      ];
-      
-      if ($isPhoneNumber) {
-        // Add phone number if it's a real phone
+      $contactFields = ['NAME' => $contactName];
+      if ($isPhoneNumber && $phone) {
         $contactFields['PHONE'] = [['VALUE' => $phone, 'VALUE_TYPE' => 'WORK']];
       } else {
-        // For Telegram user IDs, store in COMMENTS
-        $contactFields['COMMENTS'] = 'Telegram User ID: ' . $phone;
+        $contactFields['COMMENTS'] = 'Telegram User ID: ' . ($senderId ?: $phone ?: '');
       }
       
-      $addC = b24_call('crm.contact.add', [
-        'fields' => $contactFields
-      ]);
+      $addC = b24_call('crm.contact.add', ['fields' => $contactFields]);
       $contactId = (int)($addC['result'] ?? 0);
-      log_debug('Created new contact', ['phone' => $phone, 'contact_id' => $contactId]);
+      log_debug('Created new contact', ['contact_id' => $contactId]);
     }
   }
-  
-  // STEP 4: If still no deal found, try by contact ID (for cases where phone wasn't available initially)
+
+  // ——— If still no deal, try by contact ID then create new deal ———
   if (!$dealId && $contactId) {
     $dealList = b24_call('crm.deal.list', [
       'filter' => [
         'CONTACT_ID' => $contactId,
-        '!STAGE_SEMANTIC_ID' => ['WON', 'LOST'] // Only active deals
+        '!STAGE_SEMANTIC_ID' => ['WON', 'LOST']
       ],
       'select' => ['ID','ASSIGNED_BY_ID'],
       'order' => ['ID' => 'DESC'],
@@ -557,26 +613,21 @@ try {
     ]);
     $dealId = !empty($dealList['result'][0]['ID']) ? (int)$dealList['result'][0]['ID'] : 0;
     $assigned = !empty($dealList['result'][0]['ASSIGNED_BY_ID']) ? (int)$dealList['result'][0]['ASSIGNED_BY_ID'] : 0;
-    
     if ($dealId) {
-      log_debug('Found active deal by contact ID', ['contact_id' => $contactId, 'deal_id' => $dealId]);
+      log_debug('Deal found by contact ID', ['contact_id' => $contactId, 'deal_id' => $dealId]);
     }
   }
   
-  // STEP 5: If still no deal found, create a new one
   if (!$dealId) {
-    $dealTitle = $isPhoneNumber 
+    $dealTitle = $isPhoneNumber
       ? 'Telegram: ' . $phone
-      : 'Telegram User: ' . ($senderUsername ? '@' . $senderUsername : $phone);
+      : 'Telegram User: ' . ($senderUsername ? '@' . $senderUsername : ($senderId ?: $phone));
     
     $addD = b24_call('crm.deal.add', [
-      'fields' => [
-        'TITLE' => $dealTitle,
-        'CONTACT_ID' => $contactId
-      ]
+      'fields' => ['TITLE' => $dealTitle, 'CONTACT_ID' => $contactId]
     ]);
     $dealId = (int)($addD['result'] ?? 0);
-    log_debug('Created new deal', ['phone' => $phone, 'contact_id' => $contactId, 'deal_id' => $dealId]);
+    log_debug('Created new deal', ['contact_id' => $contactId, 'deal_id' => $dealId]);
   }
 
   // 1) Deal timeline — always add so the message is visible on the deal
