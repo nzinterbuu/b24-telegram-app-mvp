@@ -99,11 +99,25 @@ function log_debug(string $msg, array $ctx=[]): void {
   @file_put_contents(__DIR__ . '/../logs/app.log', $line, FILE_APPEND);
 }
 
-/** Always log inbound callback payload to server log (logs/app.log). No DEBUG flag required. */
+/**
+ * Always log inbound callback payload. Safe for Render.com and other PaaS:
+ * - Writes to PHP error_log (stderr) so it appears in Render Dashboard → Logs.
+ * - Tries to write to logs/app.log; if not writable (e.g. read-only filesystem), uses system temp dir.
+ */
 function log_inbound_payload($payload): void {
-  $line = '[' . gmdate('c') . '] INBOUND CALLBACK PAYLOAD ' . json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) . "\n";
-  @mkdir(__DIR__ . '/../logs', 0777, true);
-  @file_put_contents(__DIR__ . '/../logs/app.log', $line, FILE_APPEND);
+  $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+  $line = '[' . gmdate('c') . '] INBOUND CALLBACK PAYLOAD ' . $json . "\n";
+
+  // 1) Send to PHP error log (stderr) — always works on Render and shows in Dashboard → Logs
+  @error_log('INBOUND CALLBACK PAYLOAD ' . $json);
+
+  // 2) Try to append to logs/app.log; fallback to system temp dir if logs/ isn't writable (e.g. on Render)
+  $logDir = __DIR__ . '/../logs';
+  if (!@is_dir($logDir)) {
+    @mkdir($logDir, 0777, true);
+  }
+  $logFile = (@is_dir($logDir) && @is_writable($logDir)) ? ($logDir . '/app.log') : (rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . '/b24-telegram-inbound.log');
+  @file_put_contents($logFile, $line, FILE_APPEND);
 }
 
 /** Get Open Line ID for portal (from DB or config fallback). */

@@ -58,6 +58,11 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
 - /uninstall.php (unregisters placements)
 - /webhook/grey_inbound.php (set as Grey tenant callback_url)
 
+## Logs (including on Render.com)
+Inbound callback payloads are always logged so you can debug webhook data.
+- **Render.com:** Open your service → **Logs** tab. Inbound payloads appear as `INBOUND CALLBACK PAYLOAD {...}` (they go to stderr). The app also tries to write to `logs/app.log`; if the filesystem is read-only, it falls back to the system temp directory.
+- **Local / VPS:** Check `logs/app.log` in the project folder.
+
 ## Security
 This MVP stores tokens in `storage.sqlite` (SQLite) in the app folder.
 For production: move to managed DB and encrypt secrets at rest.
