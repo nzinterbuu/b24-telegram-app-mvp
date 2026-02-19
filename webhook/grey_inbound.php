@@ -18,12 +18,25 @@ function normalize_phone(?string $phone): ?string {
   return $p;
 }
 
-/** Extract phone and text from payload (top-level or nested in message/event). Grey may send: tenant_id, event, message (with message containing from/peer and text). 
+/** Extract phone and text from payload (top-level or nested in message/event). Grey may send: tenant_id, event, message (with message containing phone, from, text/content). 
  * Prioritizes phone number fields over chatid fields - if both are present, uses phone number for deal creation. */
 function parse_inbound_payload(array $payload): array {
   $phone = null;
   $chatId = null;
   $text = '';
+  
+  // Prefer message.phone first (callback often has message.phone, message.content, etc.)
+  if (isset($payload['message']) && is_array($payload['message'])) {
+    $msg = $payload['message'];
+    if (isset($msg['phone']) && $msg['phone'] !== '' && $msg['phone'] !== null) {
+      $p = normalize_phone((string)$msg['phone']);
+      if ($p) $phone = $p;
+    }
+  }
+  if (!$phone && isset($payload['phone']) && $payload['phone'] !== '' && $payload['phone'] !== null) {
+    $p = normalize_phone((string)$payload['phone']);
+    if ($p) $phone = $p;
+  }
   
   // Build list of arrays to check, including nested structures
   $try = [];
@@ -33,7 +46,7 @@ function parse_inbound_payload(array $payload): array {
     $try[] = $payload;
   }
   
-  // message object (common structure: { tenant_id, event, message: { from, text, ... } })
+  // message object (common structure: { tenant_id, event, message: { phone, from, text, content, ... } })
   if (isset($payload['message']) && is_array($payload['message'])) {
     $try[] = $payload['message'];
     
@@ -271,6 +284,31 @@ try {
   $chatId = $parsed['chatid'] ?? null;
   $text = $parsed['text'];
 
+  // Explicitly read phone from callback payload (backend may send message.phone or top-level phone)
+  // This ensures we never ignore phone when the incoming message includes it
+  if (isset($payload['message']['phone']) && $payload['message']['phone'] !== '' && $payload['message']['phone'] !== null) {
+    $explicitPhone = normalize_phone((string)$payload['message']['phone']);
+    if ($explicitPhone) {
+      $phone = $explicitPhone;
+      log_debug('Phone taken from payload.message.phone', ['phone' => $phone]);
+    }
+  }
+  if (!$phone && isset($payload['phone']) && $payload['phone'] !== '' && $payload['phone'] !== null) {
+    $explicitPhone = normalize_phone((string)$payload['phone']);
+    if ($explicitPhone) {
+      $phone = $explicitPhone;
+      log_debug('Phone taken from payload.phone', ['phone' => $phone]);
+    }
+  }
+
+  // Extract text from 'content' if present (some backends send content instead of text)
+  if (($text === '' || $text === null) && isset($payload['message']['content']) && $payload['message']['content'] !== '' && $payload['message']['content'] !== null) {
+    $text = trim((string)$payload['message']['content']);
+  }
+  if (($text === '' || $text === null) && isset($payload['content']) && $payload['content'] !== '' && $payload['content'] !== null) {
+    $text = trim((string)$payload['content']);
+  }
+
   // Check webhook is configured (required for inbound)
   $webhook = rtrim(getenv('B24_WEBHOOK_URL') ?: cfg('B24_WEBHOOK_URL', ''), '/');
   if ($webhook === '') {
@@ -293,11 +331,11 @@ try {
   }
   
   // If no phone but we have chatid, use chatid as identifier (Telegram user ID)
-  // This handles cases where Grey API only provides Telegram user ID, not phone number
-  if (!$phone && $chatId) {
-    // Use chatid as the identifier - format it as a pseudo-phone for compatibility
-    // Store the original chatid separately for reference
-    $phone = $chatId; // Will be used as identifier, but we'll handle it specially
+  // Only do this when we truly have no phone - never overwrite a real phone with chat_id
+  $digitsOnlyForCheck = $phone ? preg_replace('/[^0-9]/', '', (string)$phone) : '';
+  $hasRealPhone = $phone && (strpos((string)$phone, '+') === 0 ? strlen($digitsOnlyForCheck) >= 10 : strlen($digitsOnlyForCheck) >= 11);
+  if (!$hasRealPhone && $chatId) {
+    $phone = $chatId;
     log_debug('Using Telegram user ID as identifier (no phone available)', ['chatid' => $chatId]);
   }
   
@@ -476,13 +514,32 @@ try {
   if ($isPhoneNumber && $phone) {
     log_debug('Deal lookup step 1: by phone number', ['phone' => $phone]);
     
-    $contactsWithPhone = b24_call('crm.contact.list', [
-      'filter' => ['PHONE' => $phone],
-      'select' => ['ID', 'NAME']
-    ]);
+    // Bitrix24 may store phone as "+79265959655" or "79265959655" — search both
+    $phoneVariants = [$phone];
+    $digitsOnly = preg_replace('/[^0-9]/', '', (string)$phone);
+    if (strpos((string)$phone, '+') === 0 && strlen($digitsOnly) >= 10) {
+      $phoneVariants[] = $digitsOnly; // without +
+    } elseif (strlen($digitsOnly) >= 10) {
+      $phoneVariants[] = '+' . $digitsOnly; // with +
+    }
     
-    if (!empty($contactsWithPhone['result']) && is_array($contactsWithPhone['result'])) {
-      $contactIds = array_map(function($c) { return (int)$c['ID']; }, $contactsWithPhone['result']);
+    $contactIds = [];
+    foreach ($phoneVariants as $pv) {
+      $contactsWithPhone = b24_call('crm.contact.list', [
+        'filter' => ['PHONE' => $pv],
+        'select' => ['ID', 'NAME']
+      ]);
+      if (!empty($contactsWithPhone['result']) && is_array($contactsWithPhone['result'])) {
+        foreach ($contactsWithPhone['result'] as $c) {
+          $id = (int)$c['ID'];
+          if (!in_array($id, $contactIds, true)) {
+            $contactIds[] = $id;
+          }
+        }
+      }
+    }
+    
+    if (!empty($contactIds)) {
       $result = $find_active_deal_by_contact_ids($contactIds);
       if ($result) {
         $dealId = $result['dealId'];
