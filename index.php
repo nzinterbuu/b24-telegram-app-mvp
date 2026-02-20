@@ -89,6 +89,23 @@ require_once __DIR__ . '/lib/bootstrap.php';
   </div>
 
   <div class="card">
+    <h2>Open Lines (Contact Center)</h2>
+    <p class="small">Select an Open Line so incoming Telegram messages create chats in Contact Center. Operators can reply from there.</p>
+    <div class="row">
+      <div>
+        <label>Open Line</label>
+        <select id="openline_select">
+          <option value="">— None (Deal tab only) —</option>
+        </select>
+      </div>
+      <div>
+        <button type="button" onclick="App.saveOpenLine()">Save</button>
+      </div>
+    </div>
+    <div class="small" style="margin-top:8px;">If none is selected, messages still appear on the Deal tab and in notifications only.</div>
+  </div>
+
+  <div class="card">
     <h2>Inbound webhook (receive messages)</h2>
     <div class="small">
       Set the Grey tenant <strong>callback_url</strong> to this URL so incoming Telegram messages are received:
@@ -106,6 +123,7 @@ BX24.init(function() {
   BX24.resizeWindow(980, 900);
   App.loadTenants()
     .then(function() { return App.loadSettings(); })
+    .then(function() { return App.loadOpenLines(); })
     .then(function() { return App.loadMessageLog(); })
     .catch(function(err) { document.getElementById('status_out').textContent = String(err); });
 });

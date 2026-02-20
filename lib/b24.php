@@ -100,6 +100,21 @@ function b24_get_first_portal(): ?string {
   return $row ? $row['portal'] : null;
 }
 
+/** Resolve portal from OnImConnectorMessageAdd (or similar) event payload. Prefer member_id → portal from b24_oauth_tokens. */
+function b24_portal_from_event(array $payload): ?string {
+  $memberId = $payload['member_id'] ?? $payload['MEMBER_ID'] ?? $payload['auth']['member_id'] ?? $payload['data']['member_id'] ?? null;
+  if ($memberId !== null && $memberId !== '') {
+    $pdo = ensure_db();
+    $stmt = $pdo->prepare("SELECT portal FROM b24_oauth_tokens WHERE member_id=? LIMIT 1");
+    $stmt->execute([$memberId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) return $row['portal'];
+  }
+  $domain = $payload['domain'] ?? $payload['DOMAIN'] ?? $payload['auth']['domain'] ?? null;
+  if ($domain) return $domain;
+  return b24_get_first_portal();
+}
+
 function b24_call(string $method, array $params = [], ?array $auth = null): array {
   // If auth is provided (from iframe/UI), prefer OAuth over webhook (for install/admin operations)
   // Check both before and after normalization since AUTH_ID becomes access_token

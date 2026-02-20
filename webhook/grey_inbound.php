@@ -723,57 +723,67 @@ try {
     }
   }
 
-  // 3) Open Lines / Contact Center — use ol_map (tenant_id + peer → external_user_id/external_chat_id), send to selected line
-  $portal = b24_get_first_portal();
+  // 3) Open Lines / Contact Center — inject into Open Line so chats appear in Contact Center
+  $portal = null;
+  if ($tenantId !== null && $tenantId !== '') {
+    $pdo = ensure_db();
+    $stmt = $pdo->prepare("SELECT portal FROM user_settings WHERE tenant_id=? LIMIT 1");
+    $stmt->execute([$tenantId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) $portal = $row['portal'];
+  }
+  if (!$portal) {
+    $portal = b24_get_first_portal();
+  }
   $lineId = $portal ? get_portal_line_id($portal) : null;
-  if ($lineId === null) {
-    $lineId = cfg('OPENLINES_LINE_ID');
-    $lineId = ($lineId !== null && $lineId !== '') ? (string)$lineId : null;
+  if (!$lineId && $portal) {
+    log_debug('Open Lines not configured for portal', ['portal' => $portal]);
   }
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
+  $peer = $phone;
   if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
-      // Use $phone as peer (it contains either phone number or Telegram user ID)
-      $peer = $phone; // This is the identifier to use for ol_map
-      $ext = ol_map_get_or_create($portal, $lineId, (string)$tenantId, $peer);
-      $messageId = 'tg_' . $peer . '_' . time() . '_' . bin2hex(random_bytes(4));
-      $userName = $senderUsername 
-        ? '@' . $senderUsername 
+      $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);
+      $messageId = 'tg_' . substr($ext['external_chat_id'], 0, 12) . '_' . time() . '_' . bin2hex(random_bytes(4));
+      $userName = $senderUsername
+        ? '@' . $senderUsername
         : ($isPhoneNumber ? 'Telegram ' . $phone : 'Telegram User ' . $phone);
       if (strlen($userName) > 25) $userName = substr($userName, 0, 22) . '…';
-      
       $userData = [
         'id' => $ext['external_user_id'],
         'name' => $userName,
         'last_name' => '',
+        'skip_phone_validate' => 'Y',
       ];
-      
-      // Only add phone field if it's a real phone number
       if ($isPhoneNumber) {
         $userData['phone'] = $phone;
-        $userData['skip_phone_validate'] = 'Y';
       }
-      
-      b24_call('imconnector.send.messages', [
-        'CONNECTOR' => $connectorId,
-        'LINE' => $lineId,
-        'MESSAGES' => [
-          [
-            'user' => $userData,
-            'message' => [
-              'id' => $messageId,
-              'date' => (string)time(),
-              'text' => $text,
-            ],
-            'chat' => [
-              'id' => $ext['external_chat_id'],
-              'name' => $userName,
+      $auth = b24_get_stored_auth($portal);
+      if (!$auth) {
+        log_debug('Open Lines injection skipped: no OAuth for portal', ['portal' => $portal]);
+      } else {
+        b24_call('imconnector.send.messages', [
+          'CONNECTOR' => $connectorId,
+          'LINE' => (int)$lineId,
+          'MESSAGES' => [
+            [
+              'user' => $userData,
+              'message' => [
+                'id' => $messageId,
+                'date' => (string)time(),
+                'text' => $text,
+              ],
+              'chat' => [
+                'id' => $ext['external_chat_id'],
+                'name' => $userName,
+              ],
             ],
           ],
-        ],
-      ]);
+        ], $auth);
+        log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer]);
+      }
     } catch (Throwable $e) {
-      log_debug('imconnector.send.messages failed', ['e' => $e->getMessage()]);
+      log_debug('imconnector.send.messages failed', ['e' => $e->getMessage(), 'portal' => $portal]);
     }
   }
 

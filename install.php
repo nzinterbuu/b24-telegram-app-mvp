@@ -64,30 +64,6 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
       log_debug('imconnector.register/event.bind failed (optional)', ['e' => $ex->getMessage()]);
     }
 
-    $lineId = cfg('OPENLINES_LINE_ID');
-    $lineId = ($lineId !== null && $lineId !== '') ? (string)$lineId : '';
-    if ($lineId !== '') {
-      try {
-        b24_call('imconnector.activate', [
-          'CONNECTOR' => $connectorId,
-          'LINE' => (int)$lineId,
-          'ACTIVE' => 1,
-        ], $auth);
-        b24_call('imconnector.connector.data.set', [
-          'CONNECTOR' => $connectorId,
-          'LINE' => (int)$lineId,
-          'DATA' => [
-            'id' => 'grey_tg',
-            'url' => $public,
-            'url_im' => $public . '/contact_center.php',
-            'name' => 'Telegram (GreyTG)',
-          ],
-        ], $auth);
-      } catch (Throwable $ex) {
-        log_debug('imconnector.activate/connector.data.set failed', ['e' => $ex->getMessage()]);
-      }
-    }
-
     $norm = b24_normalize_auth($auth);
     $domain = $norm['domain'] ?? null;
     $accessToken = $norm['access_token'] ?? null;
@@ -100,9 +76,6 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
         'expires_at' => time() + $expiresIn,
         'member_id' => $norm['member_id'] ?? null,
       ]);
-      if ($lineId !== '') {
-        set_portal_line_id($domain, $lineId);
-      }
     }
 
     json_response(['ok' => true, 'deal_tab' => $res1, 'contact_center' => $res2]);
@@ -157,30 +130,6 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
       log_debug('imconnector.register/event.bind failed (optional)', ['e' => $ex->getMessage()]);
     }
 
-    $lineId = cfg('OPENLINES_LINE_ID');
-    $lineId = ($lineId !== null && $lineId !== '') ? (string)$lineId : '';
-    if ($lineId !== '') {
-      try {
-        b24_call('imconnector.activate', [
-          'CONNECTOR' => $connectorId,
-          'LINE' => (int)$lineId,
-          'ACTIVE' => 1,
-        ], $auth);
-        b24_call('imconnector.connector.data.set', [
-          'CONNECTOR' => $connectorId,
-          'LINE' => (int)$lineId,
-          'DATA' => [
-            'id' => 'grey_tg',
-            'url' => $public,
-            'url_im' => $public . '/contact_center.php',
-            'name' => 'Telegram (GreyTG)',
-          ],
-        ], $auth);
-      } catch (Throwable $ex) {
-        log_debug('imconnector.activate/connector.data.set failed', ['e' => $ex->getMessage()]);
-      }
-    }
-
     $norm = b24_normalize_auth(is_array($auth) ? $auth : []);
     $domain = $norm['domain'] ?? null;
     $accessToken = $norm['access_token'] ?? null;
@@ -193,9 +142,6 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
         'expires_at' => time() + $expiresIn,
         'member_id' => $norm['member_id'] ?? $_REQUEST['member_id'] ?? $data['member_id'] ?? null,
       ]);
-      if ($lineId !== '') {
-        set_portal_line_id($domain, $lineId);
-      }
     }
 
     // Success with request auth – output minimal page that calls installFinish

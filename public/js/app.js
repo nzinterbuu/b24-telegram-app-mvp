@@ -118,7 +118,40 @@ async function loadSettings(){
         if (!found && data.tenant_id) sel.innerHTML = '<option value="">— Select tenant —</option><option value="' + data.tenant_id + '" selected>Saved: ' + data.tenant_id + '</option>' + (sel.options.length > 2 ? '' : '');
       }
     }
+    if (el('openline_select') && data.line_id !== undefined) {
+      el('openline_select').value = data.line_id || '';
+    }
     setText('status_out', JSON.stringify(data.status || {}, null, 2));
+  } catch (e) {
+    setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
+  }
+}
+
+async function loadOpenLines(){
+  var sel = el('openline_select');
+  if (!sel) return;
+  try {
+    var data = await api('ajax/openlines_list.php', {});
+    var lines = data.lines || [];
+    var current = sel.value || '';
+    sel.innerHTML = '<option value="">— None (Deal tab only) —</option>';
+    lines.forEach(function(l) {
+      var opt = document.createElement('option');
+      opt.value = l.ID || l.id || '';
+      opt.textContent = (l.LINE_NAME || l.line_name || 'Line ' + (l.ID || l.id)) + ' (ID: ' + (l.ID || l.id) + ')';
+      if (String(opt.value) === String(current)) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch (e) {
+    sel.innerHTML = '<option value="">— Error loading lines —</option>';
+  }
+}
+
+async function saveOpenLine(){
+  try {
+    var lineId = el('openline_select') ? el('openline_select').value : '';
+    var data = await api('ajax/openlines_save.php', { line_id: lineId });
+    setText('status_out', JSON.stringify(data, null, 2));
   } catch (e) {
     setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
   }
@@ -231,5 +264,6 @@ async function loadMessageLog() {
 window.App = {
   loadSettings, saveSettings, refreshStatus, startOtp, resendOtp, verifyOtp, logout, sendFromDeal,
   loadTenants, onTenantSelectChange, showCreateTenant, hideCreateTenant, createTenant,
+  loadOpenLines, saveOpenLine,
   loadMessageLog
 };

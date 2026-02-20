@@ -67,18 +67,39 @@ function ensure_db(): PDO {
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_message_log_portal_created ON message_log(portal, created_at DESC)");
   $pdo->exec("CREATE TABLE IF NOT EXISTS portal_settings (
       portal TEXT PRIMARY KEY,
-      line_id TEXT NOT NULL DEFAULT ''
+      line_id TEXT NOT NULL DEFAULT '',
+      updated_at INTEGER
   )");
+  // Add updated_at if table existed without it
+  try {
+    $pdo->exec("ALTER TABLE portal_settings ADD COLUMN updated_at INTEGER");
+  } catch (Throwable $e) { /* column may exist */ }
+
+  // ol_map: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). No line_id in key.
   $pdo->exec("CREATE TABLE IF NOT EXISTS ol_map (
       portal TEXT NOT NULL,
-      line_id TEXT NOT NULL,
       tenant_id TEXT NOT NULL,
       peer TEXT NOT NULL,
       external_user_id TEXT NOT NULL,
       external_chat_id TEXT NOT NULL,
-      PRIMARY KEY (portal, line_id, tenant_id, peer)
+      created_at INTEGER,
+      updated_at INTEGER,
+      PRIMARY KEY (portal, tenant_id, peer)
   )");
-  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, line_id, external_user_id, external_chat_id)");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
+  // One-time migration: if ol_map has line_id (old schema), recreate without line_id
+  $cols = $pdo->query("PRAGMA table_info(ol_map)")->fetchAll(PDO::FETCH_ASSOC);
+  $hasLineId = false;
+  foreach ($cols as $c) {
+    if (($c['name'] ?? '') === 'line_id') { $hasLineId = true; break; }
+  }
+  if ($hasLineId) {
+    $pdo->exec("CREATE TABLE ol_map_new (portal TEXT NOT NULL, tenant_id TEXT NOT NULL, peer TEXT NOT NULL, external_user_id TEXT NOT NULL, external_chat_id TEXT NOT NULL, created_at INTEGER, updated_at INTEGER, PRIMARY KEY (portal, tenant_id, peer))");
+    $pdo->exec("INSERT OR IGNORE INTO ol_map_new (portal, tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at) SELECT portal, tenant_id, peer, external_user_id, external_chat_id, NULL, NULL FROM ol_map");
+    $pdo->exec("DROP TABLE ol_map");
+    $pdo->exec("ALTER TABLE ol_map_new RENAME TO ol_map");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
+  }
   return $pdo;
 }
 
@@ -137,33 +158,42 @@ function get_portal_line_id(string $portal): ?string {
 /** Set Open Line ID for portal. */
 function set_portal_line_id(string $portal, string $lineId): void {
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("INSERT INTO portal_settings (portal, line_id) VALUES (?,?) ON CONFLICT(portal) DO UPDATE SET line_id=excluded.line_id");
-  $stmt->execute([$portal, $lineId]);
+  $now = time();
+  $stmt = $pdo->prepare("INSERT INTO portal_settings (portal, line_id, updated_at) VALUES (?,?,?) ON CONFLICT(portal) DO UPDATE SET line_id=excluded.line_id, updated_at=excluded.updated_at");
+  $stmt->execute([$portal, $lineId, $now]);
 }
 
-/** Get or create ol_map entry: (portal, line_id, tenant_id, peer) <-> (external_user_id, external_chat_id). */
-function ol_map_get_or_create(string $portal, string $lineId, string $tenantId, string $peer): array {
+/** Get or create ol_map entry: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). */
+function ol_map_get_or_create(string $portal, string $tenantId, string $peer): array {
   $pdo = ensure_db();
   $peer = trim($peer);
-  $stmt = $pdo->prepare("SELECT external_user_id, external_chat_id FROM ol_map WHERE portal=? AND line_id=? AND tenant_id=? AND peer=?");
-  $stmt->execute([$portal, $lineId, $tenantId, $peer]);
+  $stmt = $pdo->prepare("SELECT external_user_id, external_chat_id FROM ol_map WHERE portal=? AND tenant_id=? AND peer=?");
+  $stmt->execute([$portal, $tenantId, $peer]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
   if ($row) {
+    $now = time();
+    $pdo->prepare("UPDATE ol_map SET updated_at=? WHERE portal=? AND tenant_id=? AND peer=?")->execute([$now, $portal, $tenantId, $peer]);
     return ['external_user_id' => $row['external_user_id'], 'external_chat_id' => $row['external_chat_id']];
   }
-  $externalUserId = preg_replace('/[^0-9a-zA-Z_]/', '_', $peer);
-  if ($externalUserId === '') $externalUserId = 'u_' . bin2hex(random_bytes(4));
-  $externalChatId = 'tg_' . preg_replace('/[^0-9a-zA-Z]/', '_', $peer);
-  $ins = $pdo->prepare("INSERT OR REPLACE INTO ol_map (portal, line_id, tenant_id, peer, external_user_id, external_chat_id) VALUES (?,?,?,?,?,?)");
-  $ins->execute([$portal, $lineId, $tenantId, $peer, $externalUserId, $externalChatId]);
+  $key = $portal . '|' . $tenantId . '|' . $peer;
+  $externalUserId = 'tg_u_' . sha1($key);
+  $externalChatId = 'tg_c_' . sha1($key);
+  $now = time();
+  $ins = $pdo->prepare("INSERT INTO ol_map (portal, tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)");
+  $ins->execute([$portal, $tenantId, $peer, $externalUserId, $externalChatId, $now, $now]);
   return ['external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId];
 }
 
-/** Resolve (portal, line_id, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. */
-function ol_map_resolve_to_grey(string $portal, string $lineId, string $externalUserId, string $externalChatId): ?array {
+/** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. */
+function ol_map_resolve_to_peer(string $portal, string $externalUserId, string $externalChatId): ?array {
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("SELECT tenant_id, peer FROM ol_map WHERE portal=? AND line_id=? AND external_user_id=? AND external_chat_id=?");
-  $stmt->execute([$portal, $lineId, $externalUserId, $externalChatId]);
+  $stmt = $pdo->prepare("SELECT tenant_id, peer FROM ol_map WHERE portal=? AND external_user_id=? AND external_chat_id=?");
+  $stmt->execute([$portal, $externalUserId, $externalChatId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
   return $row ? ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer']] : null;
+}
+
+/** @deprecated Use ol_map_resolve_to_peer. Kept for backward compatibility. */
+function ol_map_resolve_to_grey(string $portal, string $lineId, string $externalUserId, string $externalChatId): ?array {
+  return ol_map_resolve_to_peer($portal, $externalUserId, $externalChatId);
 }

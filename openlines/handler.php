@@ -35,10 +35,20 @@ if ($event !== 'OnImConnectorMessageAdd' && $event !== 'ONIMCONNECTORMESSAGEADD'
 $data = $payload['data'] ?? $payload['DATA'] ?? $payload;
 $connector = (string)pick($data, ['connector', 'CONNECTOR']);
 $lineId = (string)pick($data, ['line', 'LINE', 'line_id']);
-$message = is_array($data['message'] ?? null) ? $data['message'] : (is_array($data['MESSAGE'] ?? null) ? $data['MESSAGE'] : []);
-$text = trim((string)pick($message, ['text', 'TEXT', 'message', 'MESSAGE']));
+$messages = $data['MESSAGES'] ?? $data['messages'] ?? null;
+if (is_array($messages) && !empty($messages)) {
+  $firstMsg = $messages[0];
+  $message = is_array($firstMsg['message'] ?? null) ? $firstMsg['message'] : (is_array($firstMsg['MESSAGE'] ?? null) ? $firstMsg['MESSAGE'] : []);
+  $chat = is_array($firstMsg['chat'] ?? null) ? $firstMsg['chat'] : (is_array($firstMsg['CHAT'] ?? null) ? $firstMsg['CHAT'] : []);
+  $im = $firstMsg['im'] ?? $firstMsg['IM'] ?? null;
+} else {
+  $message = is_array($data['message'] ?? null) ? $data['message'] : (is_array($data['MESSAGE'] ?? null) ? $data['MESSAGE'] : []);
+  $chat = is_array($data['chat'] ?? null) ? $data['chat'] : (is_array($data['CHAT'] ?? null) ? $data['CHAT'] : []);
+  $im = $data['im'] ?? $data['IM'] ?? null;
+}
 $user = is_array($data['user'] ?? null) ? $data['user'] : (is_array($data['USER'] ?? null) ? $data['USER'] : []);
-$chat = is_array($data['chat'] ?? null) ? $data['chat'] : (is_array($data['CHAT'] ?? null) ? $data['CHAT'] : []);
+if (empty($chat)) $chat = [];
+$text = trim((string)pick($message, ['text', 'TEXT', 'message', 'MESSAGE']));
 $externalUserId = (string)pick($user, ['id', 'ID', 'external_id']);
 $externalChatId = (string)pick($chat, ['id', 'ID', 'external_id']);
 if ($externalUserId === '') $externalUserId = (string)pick($message, ['user_id', 'USER_ID']);
@@ -62,14 +72,19 @@ if ($connector !== $connectorId) {
   exit;
 }
 
-$portal = b24_get_first_portal();
+$portal = b24_portal_from_event($payload);
+if (!$portal) {
+  $portal = b24_get_first_portal();
+}
 if (!$portal) {
   log_debug('openlines handler no portal');
   json_response(['ok' => false, 'error' => 'No portal (webhook/OAuth not configured)']);
   exit;
 }
 
-$mapping = ol_map_resolve_to_grey($portal, $lineId, $externalUserId, $externalChatId);
+log_debug('openlines handler resolve peer', ['portal' => $portal, 'external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId]);
+
+$mapping = ol_map_resolve_to_peer($portal, $externalUserId, $externalChatId);
 if (!$mapping) {
   log_debug('openlines handler no ol_map', [
     'portal' => $portal,
@@ -110,19 +125,25 @@ try {
 
 message_log_insert('out', $portal, $tenantId, $peer, $text, null, 'openlines', null);
 
-// Confirm delivery to Bitrix24 so the message shows as sent
+// Confirm delivery to Bitrix24 (forward 'im' from incoming event; message.id must be array of IDs per API)
+$msgId = pick($message, ['id', 'ID']) ?: ('ol_' . time());
+$msgIdArray = is_array($msgId) ? $msgId : [$msgId];
+$deliveryItem = [
+  'message' => ['id' => $msgIdArray],
+  'chat' => ['id' => $externalChatId],
+];
+if (is_array($im)) {
+  $deliveryItem['im'] = $im;
+}
 try {
-  b24_call('imconnector.send.status.delivery', [
-    'CONNECTOR' => $connectorId,
-    'LINE' => (int)$lineId,
-    'MESSAGES' => [
-      [
-        'im',
-        'message' => ['id' => pick($message, ['id', 'ID']) ?: ('ol_' . time())],
-        'chat' => ['id' => $externalChatId],
-      ],
-    ],
-  ]);
+  $auth = b24_get_stored_auth($portal);
+  if ($auth) {
+    b24_call('imconnector.send.status.delivery', [
+      'CONNECTOR' => $connectorId,
+      'LINE' => (int)$lineId,
+      'MESSAGES' => [$deliveryItem],
+    ], $auth);
+  }
 } catch (Throwable $e) {
   log_debug('imconnector.send.status.delivery failed', ['e' => $e->getMessage()]);
 }
