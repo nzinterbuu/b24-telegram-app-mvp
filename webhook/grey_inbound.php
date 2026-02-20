@@ -745,24 +745,30 @@ try {
     try {
       $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);
       $messageId = 'tg_' . substr($ext['external_chat_id'], 0, 12) . '_' . time() . '_' . bin2hex(random_bytes(4));
-      $userName = $senderUsername
-        ? '@' . $senderUsername
-        : ($isPhoneNumber ? 'Telegram ' . $phone : 'Telegram User ' . $phone);
-      if (strlen($userName) > 25) $userName = substr($userName, 0, 22) . '…';
+      // Bitrix: name/last_name only letters, spaces, hyphens, apostrophes; max 25 chars each
+      $rawDisplay = $senderUsername ? ('@' . ltrim($senderUsername, '@')) : ($isPhoneNumber ? ('Tel ' . $phone) : ('User ' . $peer));
+      $sanitized = preg_replace('/[^a-zA-Z\s\-'\p{L}]/u', '', $rawDisplay);
+      $sanitized = trim($sanitized);
+      if ($sanitized === '') $sanitized = 'Telegram';
+      $name = mb_substr($sanitized, 0, 25);
+      $lastName = '';
+      if (mb_strlen($sanitized) > 25) $lastName = mb_substr($sanitized, 25, 25);
       $userData = [
         'id' => $ext['external_user_id'],
-        'name' => $userName,
-        'last_name' => '',
+        'name' => $name,
+        'last_name' => $lastName,
         'skip_phone_validate' => 'Y',
       ];
       if ($isPhoneNumber) {
         $userData['phone'] = $phone;
       }
+      $chatName = $rawDisplay;
+      if (mb_strlen($chatName) > 50) $chatName = mb_substr($chatName, 0, 47) . '…';
       $auth = b24_get_stored_auth($portal);
       if (!$auth) {
         log_debug('Open Lines injection skipped: no OAuth for portal', ['portal' => $portal]);
       } else {
-        b24_call('imconnector.send.messages', [
+        $result = b24_call('imconnector.send.messages', [
           'CONNECTOR' => $connectorId,
           'LINE' => (int)$lineId,
           'MESSAGES' => [
@@ -775,15 +781,21 @@ try {
               ],
               'chat' => [
                 'id' => $ext['external_chat_id'],
-                'name' => $userName,
+                'name' => $chatName,
               ],
             ],
           ],
         ], $auth);
-        log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer]);
+        $res = $result['result'] ?? $result['DATA']['RESULT'] ?? $result['RESULT'] ?? null;
+        $first = is_array($res) && isset($res[0]) ? $res[0] : (is_array($res) ? $res : []);
+        $sessionId = $first['session']['ID'] ?? $first['session']['id'] ?? null;
+        $olChatId = $first['session']['CHAT_ID'] ?? $first['session']['chat_id'] ?? null;
+        log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer, 'session_id' => $sessionId, 'chat_id' => $olChatId]);
+        set_portal_openlines_last_inject($portal, true, ['session_id' => $sessionId, 'chat_id' => $olChatId]);
       }
     } catch (Throwable $e) {
       log_debug('imconnector.send.messages failed', ['e' => $e->getMessage(), 'portal' => $portal]);
+      set_portal_openlines_last_inject($portal, false, ['error' => $e->getMessage()]);
     }
   }
 

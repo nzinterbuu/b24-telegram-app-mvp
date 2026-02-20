@@ -68,12 +68,19 @@ function ensure_db(): PDO {
   $pdo->exec("CREATE TABLE IF NOT EXISTS portal_settings (
       portal TEXT PRIMARY KEY,
       line_id TEXT NOT NULL DEFAULT '',
-      updated_at INTEGER
+      updated_at INTEGER,
+      openlines_last_inject_at INTEGER,
+      openlines_last_inject_result TEXT
   )");
   // Add updated_at if table existed without it
   try {
     $pdo->exec("ALTER TABLE portal_settings ADD COLUMN updated_at INTEGER");
   } catch (Throwable $e) { /* column may exist */ }
+  foreach (['openlines_last_inject_at', 'openlines_last_inject_result'] as $col) {
+    try {
+      $pdo->exec("ALTER TABLE portal_settings ADD COLUMN {$col} " . ($col === 'openlines_last_inject_at' ? 'INTEGER' : 'TEXT'));
+    } catch (Throwable $e) { /* column may exist */ }
+  }
 
   // ol_map: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). No line_id in key.
   $pdo->exec("CREATE TABLE IF NOT EXISTS ol_map (
@@ -161,6 +168,29 @@ function set_portal_line_id(string $portal, string $lineId): void {
   $now = time();
   $stmt = $pdo->prepare("INSERT INTO portal_settings (portal, line_id, updated_at) VALUES (?,?,?) ON CONFLICT(portal) DO UPDATE SET line_id=excluded.line_id, updated_at=excluded.updated_at");
   $stmt->execute([$portal, $lineId, $now]);
+}
+
+/** Store last Open Lines injection result for status page (no secrets). */
+function set_portal_openlines_last_inject(string $portal, bool $success, array $data): void {
+  $pdo = ensure_db();
+  $now = time();
+  $json = json_encode(['success' => $success, 'at' => $now] + $data, JSON_UNESCAPED_UNICODE);
+  $stmt = $pdo->prepare("UPDATE portal_settings SET openlines_last_inject_at=?, openlines_last_inject_result=? WHERE portal=?");
+  $stmt->execute([$now, $json, $portal]);
+  if ($stmt->rowCount() === 0) {
+    $pdo->prepare("INSERT INTO portal_settings (portal, line_id, updated_at, openlines_last_inject_at, openlines_last_inject_result) VALUES (?, '', ?, ?, ?)")->execute([$portal, $now, $now, $json]);
+  }
+}
+
+/** Get last Open Lines injection result for current portal (for status page). */
+function get_portal_openlines_last_inject(string $portal): ?array {
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("SELECT openlines_last_inject_at, openlines_last_inject_result FROM portal_settings WHERE portal=?");
+  $stmt->execute([$portal]);
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  if (!$row || $row['openlines_last_inject_result'] === null || $row['openlines_last_inject_result'] === '') return null;
+  $dec = json_decode($row['openlines_last_inject_result'], true);
+  return is_array($dec) ? ['at' => (int)($row['openlines_last_inject_at'] ?? 0)] + $dec : null;
 }
 
 /** Get or create ol_map entry: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). */

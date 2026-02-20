@@ -103,6 +103,10 @@ require_once __DIR__ . '/lib/bootstrap.php';
       </div>
     </div>
     <div class="small" style="margin-top:8px;">If none is selected, messages still appear on the Deal tab and in notifications only.</div>
+    <div id="openlines_status_wrap" class="openlines-status-wrap" style="margin-top:12px;padding:10px;background:#f5f5f5;border-radius:6px;">
+      <strong>Open Lines status</strong>
+      <p class="small" id="openlines_status_text">Load settings to see connector and last injection.</p>
+    </div>
   </div>
 
   <div class="card">

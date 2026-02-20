@@ -121,6 +121,28 @@ async function loadSettings(){
     if (el('openline_select') && data.line_id !== undefined) {
       el('openline_select').value = data.line_id || '';
     }
+    var statusEl = el('openlines_status_text');
+    if (statusEl) {
+      var parts = [];
+      parts.push('Line: ' + (data.line_id ? data.line_id : '—'));
+      var cs = data.connector_status;
+      if (cs) {
+        if (cs.error) parts.push('Connector: error — ' + cs.error);
+        else parts.push('Connector: ' + (cs.active ? 'active' : 'not active'));
+      }
+      var inj = data.openlines_last_inject;
+      if (inj && inj.at) {
+        var when = new Date(inj.at * 1000).toISOString().replace('T', ' ').slice(0, 19);
+        if (inj.success) {
+          parts.push('Last injection: ' + when + (inj.session_id ? ' — session ' + inj.session_id + ', chat ' + (inj.chat_id || '—') : ''));
+        } else {
+          parts.push('Last injection: ' + when + ' — ' + (inj.error || 'failed'));
+        }
+      } else {
+        parts.push('Last injection: none yet');
+      }
+      statusEl.textContent = parts.join(' · ');
+    }
     setText('status_out', JSON.stringify(data.status || {}, null, 2));
   } catch (e) {
     setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
@@ -152,6 +174,7 @@ async function saveOpenLine(){
     var lineId = el('openline_select') ? el('openline_select').value : '';
     var data = await api('ajax/openlines_save.php', { line_id: lineId });
     setText('status_out', JSON.stringify(data, null, 2));
+    if (data.ok) loadSettings();
   } catch (e) {
     setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
   }

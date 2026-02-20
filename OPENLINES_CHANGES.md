@@ -72,3 +72,69 @@ Telegram inbound messages now create chats in Bitrix24 Open Lines (Contact Cente
 - `log_debug('Open Line saved and connector activated', ['portal', 'line_id'])`
 
 Enable `DEBUG` in config for these.
+
+---
+
+## Research: Messenger → Chats (Open Lines)
+
+Dialogs created via `imconnector.send.messages` appear in **Messenger → Chats** (Open Lines chat list) when:
+
+1. **CONNECTOR** and **LINE** are set to the connector ID and the Open Line config ID (numeric). The connector must be **registered** (`imconnector.register`) and **activated** for that line (`imconnector.activate` + `imconnector.connector.data.set`).
+
+2. **Required payload (imconnector.send.messages)**  
+   - **user**: `id` (external user ID, required), `name`, `last_name` (letters, spaces, hyphens, apostrophes only; max 25 chars each).  
+   - **message**: `id`, `date` (timestamp), and either `text` or `files`.  
+   - **chat**: `id` (external chat ID, required), `name` optional.  
+   - Use `skip_phone_validate => 'Y'` when phone is optional or non-standard; set `user.phone` only when it is a real phone.
+
+3. **User/chat identity**  
+   External IDs (`user.id`, `chat.id`) are the ones from the connector; we use stable values from `ol_map`: `external_user_id = "tg_u_" + sha1(portal|tenant_id|peer)`, `external_chat_id = "tg_c_" + sha1(...)`.
+
+4. **Session creation**  
+   No separate “session start” call is required. Bitrix creates/updates the Open Line session when `imconnector.send.messages` is called; the response returns `session.ID` and `session.CHAT_ID`.
+
+5. **Operator replies**  
+   Bitrix sends `OnImConnectorMessageAdd`. We resolve peer via `ol_map_resolve_to_peer`, send to Grey, then call **imconnector.send.status.delivery** with `message.id` as an **array** and optional `im` from the event. **imconnector.send.status.read** is optional (not required for dialogs to show or for delivery).
+
+6. **Auth**  
+   `imconnector.send.messages` and `imconnector.send.status.delivery` require **OAuth** (not webhook).
+
+---
+
+## Additional changes (Messenger visibility + status)
+
+### User name/last_name sanitization
+
+Bitrix accepts only letters, spaces, hyphens, apostrophes in `name` and `last_name` (max 25 chars). Inbound now sanitizes display names with `preg_replace('/[^a-zA-Z\s\-'\p{L}]/u', '', $rawDisplay)` and splits into `name` (first 25) and `last_name` (next 25) so the API does not reject the user block.
+
+### Last injection result + Open Lines status block
+
+- **lib/bootstrap.php**: `portal_settings` has `openlines_last_inject_at`, `openlines_last_inject_result` (JSON). New helpers: `set_portal_openlines_last_inject($portal, $success, $data)`, `get_portal_openlines_last_inject($portal)`.
+- **webhook/grey_inbound.php**: After a successful `imconnector.send.messages`, parses response for `session.ID` and `session.CHAT_ID` and calls `set_portal_openlines_last_inject($portal, true, [...])`; on exception calls it with `success => false` and error message.
+- **ajax/get_settings.php**: Returns `openlines_last_inject` and `connector_status` (from `imconnector.status` when line_id is set).
+- **index.php**: “Open Lines status” block (`#openlines_status_wrap` / `#openlines_status_text`) shows: Line ID, Connector (active/error), Last injection (time + session/chat or error).
+- **public/js/app.js**: In `loadSettings()`, fills the status block from `data.line_id`, `data.connector_status`, `data.openlines_last_inject`. After `saveOpenLine()` success, calls `loadSettings()` to refresh status.
+
+---
+
+## Test checklist (Messenger → Chats)
+
+1. **Setup**  
+   - Install app in Bitrix24 (OAuth stored).  
+   - In app: select tenant, connect Telegram (Grey), then select an **Open Line** and click **Save**.  
+   - Confirm “Open Lines status” shows Line ID and Connector: active.
+
+2. **Inbound → Messenger**  
+   - Send a message from Telegram to the connected bot/tenant.  
+   - In Bitrix24 open **Messenger → Chats** (or Contact Center / Open Lines chat list).  
+   - Confirm a new chat appears for that Telegram user (name may be sanitized, e.g. “Telegram” or username without @).  
+   - Confirm the message text is visible in the chat.
+
+3. **Outbound (operator reply)**  
+   - From **Messenger → Chats**, open the same conversation and send a reply as operator.  
+   - Confirm the message is delivered to Telegram.  
+   - Confirm in Bitrix24 the message shows as delivered (no persistent “sending” state).
+
+4. **Status and logs**  
+   - In app, “Open Lines status” shows “Last injection” with time and session/chat IDs after an inbound message.  
+   - With `DEBUG` enabled, server logs show “Open Lines inbound injected” (and optional session_id/chat_id) and no “imconnector.send.messages failed” for that request.
