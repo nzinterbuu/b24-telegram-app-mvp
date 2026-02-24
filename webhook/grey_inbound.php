@@ -809,7 +809,9 @@ try {
             $notifyUserId = !empty($u['result'][0]['ID']) ? (int)$u['result'][0]['ID'] : 0;
           }
           if ($notifyUserId) {
-            $openLinesChatUrl = 'https://' . $portal . '/online/im/chat/' . (int)$olChatId . '/';
+            // Chat URL: default /online/im/chat/{id}/. Override with OPENLINES_CHAT_PATH in config (use {CHAT_ID} placeholder), e.g. '/online/im/chat/{CHAT_ID}/' or '/online/?dialog=im&chatId={CHAT_ID}'.
+            $chatPathTemplate = cfg('OPENLINES_CHAT_PATH', '/online/im/chat/{CHAT_ID}/');
+            $openLinesChatUrl = 'https://' . $portal . str_replace('{CHAT_ID}', (string)(int)$olChatId, $chatPathTemplate);
             $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $peer);
             try {
               b24_call('im.notify', [

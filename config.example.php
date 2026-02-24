@@ -33,4 +33,8 @@ return [
   // then in Bitrix24 create an Open Line and add the "Telegram (GreyTG)" connector. Copy the Open Line ID into OPENLINES_LINE_ID.
   'OPENLINES_CONNECTOR_ID' => 'telegram_grey',
   'OPENLINES_LINE_ID' => '',
+
+  // Optional: path for Open Lines chat deep link (first-message notification). Use {CHAT_ID} as placeholder.
+  // Default: /online/im/chat/{CHAT_ID}/ . If your portal uses another path under /online/, set e.g. '/online/im/chat/{CHAT_ID}/' or '/online/?dialog=im&chatId={CHAT_ID}'.
+  'OPENLINES_CHAT_PATH' => '/online/im/chat/{CHAT_ID}/',
 ];
