@@ -52,6 +52,11 @@ function ensure_db(): PDO {
       member_id TEXT,
       updated_at INTEGER
   )");
+  $pdo->exec("CREATE TABLE IF NOT EXISTS member_map (
+      member_id TEXT PRIMARY KEY,
+      domain TEXT NOT NULL,
+      updated_at INTEGER
+  )");
   $pdo->exec("CREATE TABLE IF NOT EXISTS message_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       direction TEXT NOT NULL,

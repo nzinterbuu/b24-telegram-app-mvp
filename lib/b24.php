@@ -33,6 +33,10 @@ function b24_save_oauth_tokens(string $portal, array $data): void {
     $data['member_id'] ?? null,
     time(),
   ]);
+  $memberId = $data['member_id'] ?? null;
+  if ($memberId !== null && $memberId !== '') {
+    b24_set_member_map((string)$memberId, $portal);
+  }
 }
 
 function b24_delete_oauth_tokens(string $portal): void {
@@ -117,19 +121,32 @@ function b24_portal_for_log(): string {
   return $fromWebhook ?: 'unknown';
 }
 
-/** Resolve portal from OnImConnectorMessageAdd (or similar) event payload. Prefer member_id → portal from b24_oauth_tokens. */
+/** Resolve portal from OnImConnectorMessageAdd (or similar) event payload. Prefer member_id → member_map.domain, then domain from payload; avoid first-portal when possible. */
 function b24_portal_from_event(array $payload): ?string {
-  $memberId = $payload['member_id'] ?? $payload['MEMBER_ID'] ?? $payload['auth']['member_id'] ?? $payload['data']['member_id'] ?? null;
+  $memberId = $payload['member_id'] ?? $payload['MEMBER_ID'] ?? $payload['auth']['member_id'] ?? $payload['data']['member_id'] ?? $payload['DATA']['member_id'] ?? null;
   if ($memberId !== null && $memberId !== '') {
     $pdo = ensure_db();
+    $stmt = $pdo->prepare("SELECT domain FROM member_map WHERE member_id=? LIMIT 1");
+    $stmt->execute([$memberId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row && !empty($row['domain'])) return $row['domain'];
     $stmt = $pdo->prepare("SELECT portal FROM b24_oauth_tokens WHERE member_id=? LIMIT 1");
     $stmt->execute([$memberId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) return $row['portal'];
   }
-  $domain = $payload['domain'] ?? $payload['DOMAIN'] ?? $payload['auth']['domain'] ?? null;
-  if ($domain) return $domain;
-  return b24_get_first_portal();
+  $domain = $payload['domain'] ?? $payload['DOMAIN'] ?? $payload['auth']['domain'] ?? $payload['data']['domain'] ?? $payload['DATA']['domain'] ?? null;
+  if ($domain) return is_string($domain) ? $domain : null;
+  return null;
+}
+
+/** Store member_id → domain for event handler portal resolution. Call when saving OAuth. */
+function b24_set_member_map(string $memberId, string $domain): void {
+  if ($memberId === '') return;
+  $pdo = ensure_db();
+  $now = time();
+  $stmt = $pdo->prepare("INSERT INTO member_map (member_id, domain, updated_at) VALUES (?,?,?) ON CONFLICT(member_id) DO UPDATE SET domain=excluded.domain, updated_at=excluded.updated_at");
+  $stmt->execute([$memberId, $domain, $now]);
 }
 
 function b24_call(string $method, array $params = [], ?array $auth = null): array {

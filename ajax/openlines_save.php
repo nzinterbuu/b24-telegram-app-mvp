@@ -23,6 +23,7 @@ try {
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
 
   if ($lineId !== '') {
+    $handlerUrl = $public . '/openlines/handler.php';
     b24_call('imconnector.activate', [
       'CONNECTOR' => $connectorId,
       'LINE' => (int)$lineId,
@@ -38,6 +39,11 @@ try {
         'name' => 'Telegram (GreyTG)',
       ],
     ], $auth);
+    try {
+      b24_call('event.bind', ['event' => 'OnImConnectorMessageAdd', 'handler' => $handlerUrl], $auth);
+    } catch (Throwable $e) {
+      log_debug('event.bind on save failed', ['e' => $e->getMessage()]);
+    }
     set_portal_line_id($portal, $lineId);
     log_debug('Open Line saved and connector activated', ['portal' => $portal, 'line_id' => $lineId]);
     json_response(['ok' => true, 'message' => 'Open line was set successfully.', 'line_id' => $lineId]);
