@@ -12,8 +12,10 @@ try {
   if ($name === '') throw new Exception('Tenant name is required.');
 
   $callbackUrl = trim((string)($req['callback_url'] ?? ''));
-  $body = ['name' => $name];
-  if ($callbackUrl !== '') $body['callback_url'] = $callbackUrl;
+  if ($callbackUrl === '') {
+    $callbackUrl = rtrim(cfg('PUBLIC_URL'), '/') . '/webhook/grey_inbound.php';
+  }
+  $body = ['name' => $name, 'callback_url' => $callbackUrl];
 
   $res = grey_app_call('/tenants', 'POST', $body);
   $tenant = is_array($res) && isset($res['id']) ? $res : ($res['tenant'] ?? $res);

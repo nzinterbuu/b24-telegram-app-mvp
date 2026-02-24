@@ -28,11 +28,11 @@ require_once __DIR__ . '/lib/bootstrap.php';
     <div style="margin-top:12px;">
       <button type="button" onclick="App.showCreateTenant()">Create new tenant</button>
     </div>
-    <div id="create_tenant_form" class="create-tenant-form" style="display:none;">
+    <div id="create_tenant_form" class="create-tenant-form" style="display:none;" data-callback-url="<?= htmlspecialchars(cfg('PUBLIC_URL') . '/webhook/grey_inbound.php') ?>">
       <hr/>
       <label>Name (any name)</label>
       <input id="new_tenant_name" placeholder="e.g. Sales team" />
-      <label>Callback URL (optional)</label>
+      <label>Callback URL (optional — default: app webhook)</label>
       <input id="new_tenant_callback" placeholder="https://..." />
       <div style="margin-top:8px;">
         <button type="button" onclick="App.createTenant()">Create</button>
@@ -116,7 +116,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
     </div>
     <p style="margin:8px 0;"><code><?= htmlspecialchars(cfg('PUBLIC_URL')."/webhook/grey_inbound.php") ?></code></p>
     <div class="small" style="margin-top:8px;">
-      When you <strong>Save</strong> settings (tenant + token), the app sets this URL as the tenant callback via Grey API so incoming messages are received. They appear on the <strong>Deal</strong> (timeline), trigger an <strong>IM notification</strong>, and (if Open Line is configured) in <strong>Contact Center</strong>.
+      The Grey TG API only accepts <strong>callback_url</strong> when <strong>creating</strong> a tenant (not when saving settings). New tenants created in this app get this URL by default. For an <strong>existing</strong> tenant, set this URL in Grey TG admin or create a new tenant. Messages appear on the <strong>Deal</strong> (timeline), trigger an <strong>IM notification</strong>, and (if Open Line is configured) in <strong>Contact Center</strong>.
     </div>
   </div>
 </div>

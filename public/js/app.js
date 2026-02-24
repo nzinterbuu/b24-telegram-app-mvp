@@ -73,7 +73,9 @@ function onTenantSelectChange(){
 function showCreateTenant(){
   el('create_tenant_form').style.display = 'block';
   el('new_tenant_name').value = '';
-  el('new_tenant_callback').value = '';
+  var form = el('create_tenant_form');
+  var defaultUrl = form && form.getAttribute('data-callback-url');
+  el('new_tenant_callback').value = defaultUrl || '';
 }
 function hideCreateTenant(){
   el('create_tenant_form').style.display = 'none';

@@ -47,7 +47,7 @@ then upload the ZIP to Bitrix24 (Developer area) for testing.
   - **im** — send IM notifications
 
 ## Receiving incoming messages
-1. **Tenant callback** is set automatically when you **Save** settings in the app (select tenant, enter API token/phone, then Save). The app tries Grey API `PATCH /tenants/{tenant_id}` with `{ "callback_url": "..." }`; if that returns 404, it tries `PUT /tenants/{tenant_id}/callback`. You can also set the callback manually in Grey; the URL is `https://YOUR_PUBLIC_APP_URL/webhook/grey_inbound.php` (see app → Inbound webhook).
+1. **Tenant callback**: The [Grey TG API](https://grey-tg.onrender.com/docs) only accepts `callback_url` when **creating** a tenant (POST /tenants), not when updating. When you **Create new tenant** in the app, the webhook URL is set by default. For an **existing** tenant, set the callback in Grey TG admin or create a new tenant. The URL is `https://YOUR_PUBLIC_APP_URL/webhook/grey_inbound.php` (see app → Inbound webhook).
 2. Incoming messages then:
    - **Deal:** Shown as a timeline comment on the deal (and a new deal is created if needed). Open the deal and use the **Telegram chat** tab to reply.
    - **Notification:** You get an IM notification; open the deal from the link to reply.
