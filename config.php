@@ -21,6 +21,12 @@ return [
   'B24_CLIENT_SECRET' => getenv('B24_CLIENT_SECRET') ?: '',
   'B24_WEBHOOK_URL' => getenv('B24_WEBHOOK_URL') ?: '',
 
+  // Optional: Open Lines / Contact Center. Incoming messages are always added to Deal timeline and IM notify.
+  // To also show them in Bitrix24 Contact Center (Open Lines), register the connector on install (done automatically),
+  // then in Bitrix24 create an Open Line and add the "Telegram (GreyTG)" connector. Copy the Open Line ID into OPENLINES_LINE_ID.
+  'OPENLINES_CONNECTOR_ID' => 'telegram_grey',
+  'OPENLINES_LINE_ID' => '',
+
   // Enable debug logging to logs/app.log
   'DEBUG' => true,
 ];
