@@ -745,6 +745,7 @@ try {
   if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
       $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);
+      @error_log('[Inbound->OL] map saved portal=' . $portal . ' peer=' . $peer . ' external_chat_id=' . ($ext['external_chat_id'] ?? '') . ' external_user_id=' . ($ext['external_user_id'] ?? ''));
       log_openlines('Inbound inject attempt', [
         'portal' => $portal,
         'line_id' => $lineId,

@@ -99,6 +99,7 @@ function ensure_db(): PDO {
       PRIMARY KEY (portal, tenant_id, peer)
   )");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
+  $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_portal_chat ON ol_map(portal, external_chat_id)");
   // One-time migration: if ol_map has line_id (old schema), recreate without line_id
   $cols = $pdo->query("PRAGMA table_info(ol_map)")->fetchAll(PDO::FETCH_ASSOC);
   $hasLineId = false;
@@ -111,6 +112,7 @@ function ensure_db(): PDO {
     $pdo->exec("DROP TABLE ol_map");
     $pdo->exec("ALTER TABLE ol_map_new RENAME TO ol_map");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
+    $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_portal_chat ON ol_map(portal, external_chat_id)");
   }
   return $pdo;
 }
@@ -228,7 +230,17 @@ function ol_map_get_or_create(string $portal, string $tenantId, string $peer): a
   return ['external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId, 'is_new' => true];
 }
 
-/** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. */
+/** Resolve (portal, external_chat_id) to (tenant_id, peer). Primary lookup for outbound — Bitrix may not send correct external user id. */
+function ol_map_find_by_chat_id(string $portal, string $externalChatId): ?array {
+  if ($externalChatId === '') return null;
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("SELECT tenant_id, peer, external_user_id FROM ol_map WHERE portal=? AND external_chat_id=? LIMIT 1");
+  $stmt->execute([$portal, $externalChatId]);
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  return $row ? ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer']] : null;
+}
+
+/** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. Use ol_map_find_by_chat_id first for outbound. */
 function ol_map_resolve_to_peer(string $portal, string $externalUserId, string $externalChatId): ?array {
   $pdo = ensure_db();
   $stmt = $pdo->prepare("SELECT tenant_id, peer FROM ol_map WHERE portal=? AND external_user_id=? AND external_chat_id=?");

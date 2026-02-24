@@ -17,6 +17,68 @@ function pick($a, array $keys) {
   return null;
 }
 
+/**
+ * Extract external ids and Bitrix message id from OnImConnectorMessageAdd payload.
+ * Bitrix may send internal user id (e.g. 1) for operator — so external_user_id is optional.
+ * external_chat_id is the stable key we sent in imconnector.send.messages (chat.id).
+ * Key paths: data.MESSAGES[0].chat.id, data.MESSAGES[0].user.id, data.MESSAGES[0].message.id (and DATA/MESSAGE/CHAT/USER variants).
+ */
+function extract_external_ids(array $payload): array {
+  $data = $payload['data'] ?? $payload['DATA'] ?? $payload;
+  if (!is_array($data)) $data = [];
+  $messages = $data['MESSAGES'] ?? $data['messages'] ?? null;
+  $firstMsg = null;
+  $message = [];
+  $chat = [];
+  $user = [];
+  if (is_array($messages) && !empty($messages)) {
+    $firstMsg = $messages[0];
+    $message = is_array($firstMsg['message'] ?? null) ? $firstMsg['message'] : (is_array($firstMsg['MESSAGE'] ?? null) ? $firstMsg['MESSAGE'] : []);
+    $chat = is_array($firstMsg['chat'] ?? null) ? $firstMsg['chat'] : (is_array($firstMsg['CHAT'] ?? null) ? $firstMsg['CHAT'] : []);
+    $user = is_array($firstMsg['user'] ?? null) ? $firstMsg['user'] : (is_array($firstMsg['USER'] ?? null) ? $firstMsg['USER'] : []);
+  } else {
+    $firstMsg = null;
+    $message = is_array($data['message'] ?? null) ? $data['message'] : (is_array($data['MESSAGE'] ?? null) ? $data['MESSAGE'] : []);
+    $chat = is_array($data['chat'] ?? null) ? $data['chat'] : (is_array($data['CHAT'] ?? null) ? $data['CHAT'] : []);
+    $user = [];
+  }
+  if (empty($chat) && is_array($firstMsg)) {
+    $chat = is_array($firstMsg['chat'] ?? null) ? $firstMsg['chat'] : (is_array($firstMsg['CHAT'] ?? null) ? $firstMsg['CHAT'] : []);
+  }
+  if (empty($user)) {
+    $user = is_array($data['user'] ?? null) ? $data['user'] : (is_array($data['USER'] ?? null) ? $data['USER'] : []);
+  }
+
+  $externalChatId = trim((string)pick($chat, ['id', 'ID', 'external_id']));
+  if ($externalChatId === '') $externalChatId = trim((string)pick($message, ['chat_id', 'CHAT_ID']));
+
+  $externalUserIdRaw = pick($user, ['id', 'ID', 'external_id']);
+  $externalUserId = '';
+  if ($externalUserIdRaw !== null && $externalUserIdRaw !== '') {
+    $s = (string)$externalUserIdRaw;
+    if (strpos($s, 'tg_u_') === 0 || preg_match('/^tg_[a-f0-9_]+$/i', $s)) {
+      $externalUserId = $s;
+    }
+  }
+  if ($externalUserId === '') $externalUserId = trim((string)pick($message, ['user_id', 'USER_ID']));
+  if ($externalUserId !== '' && strpos($externalUserId, 'tg_u_') !== 0 && !preg_match('/^tg_/i', $externalUserId)) {
+    $externalUserId = '';
+  }
+
+  $messageIdRaw = pick($message, ['id', 'ID']);
+  if (is_array($messageIdRaw)) {
+    $b24MessageId = array_values($messageIdRaw);
+  } else {
+    $b24MessageId = $messageIdRaw !== null && $messageIdRaw !== '' ? [$messageIdRaw] : [];
+  }
+
+  return [
+    'external_chat_id' => $externalChatId,
+    'external_user_id' => $externalUserId === '' ? null : $externalUserId,
+    'b24_message_id' => $b24MessageId,
+  ];
+}
+
 /** Safe handler log to stderr (Render). No secrets. */
 function handler_log(string $msg, array $ctx = []): void {
   $safe = [];
@@ -89,45 +151,27 @@ if (!is_array($data)) $data = [];
 $connector = (string)pick($data, ['connector', 'CONNECTOR']);
 $lineId = (string)pick($data, ['line', 'LINE', 'line_id', 'LINE_ID']);
 $messages = $data['MESSAGES'] ?? $data['messages'] ?? null;
+$firstMsg = is_array($messages) && !empty($messages) ? $messages[0] : null;
+$im = $firstMsg['im'] ?? $firstMsg['IM'] ?? $data['im'] ?? $data['IM'] ?? null;
 
-$firstMsg = null;
+$extracted = extract_external_ids($payload);
+$externalChatId = $extracted['external_chat_id'];
+$externalUserId = $extracted['external_user_id'] ?? '';
+$messageIds = $extracted['b24_message_id'];
+
 $message = [];
-$chat = [];
-$im = null;
-$user = [];
-
-if (is_array($messages) && !empty($messages)) {
-  $firstMsg = $messages[0];
+if (is_array($firstMsg)) {
   $message = is_array($firstMsg['message'] ?? null) ? $firstMsg['message'] : (is_array($firstMsg['MESSAGE'] ?? null) ? $firstMsg['MESSAGE'] : []);
-  $chat = is_array($firstMsg['chat'] ?? null) ? $firstMsg['chat'] : (is_array($firstMsg['CHAT'] ?? null) ? $firstMsg['CHAT'] : []);
-  $im = $firstMsg['im'] ?? $firstMsg['IM'] ?? null;
 } else {
   $message = is_array($data['message'] ?? null) ? $data['message'] : (is_array($data['MESSAGE'] ?? null) ? $data['MESSAGE'] : []);
-  $chat = is_array($data['chat'] ?? null) ? $data['chat'] : (is_array($data['CHAT'] ?? null) ? $data['CHAT'] : []);
-  $im = $data['im'] ?? $data['IM'] ?? null;
 }
-$user = is_array($data['user'] ?? null) ? $data['user'] : (is_array($data['USER'] ?? null) ? $data['USER'] : []);
-if (empty($chat)) $chat = [];
-
 $text = trim((string)pick($message, ['text', 'TEXT', 'message', 'MESSAGE']));
-$externalUserId = (string)pick($user, ['id', 'ID', 'external_id']);
-$externalChatId = (string)pick($chat, ['id', 'ID', 'external_id']);
-if ($externalUserId === '') $externalUserId = (string)pick($message, ['user_id', 'USER_ID']);
-if ($externalChatId === '') $externalChatId = (string)pick($message, ['chat_id', 'CHAT_ID']);
 
-// Message id from event (Bitrix outbound message id) — must be sent back in delivery status as array
-$messageIdRaw = pick($message, ['id', 'ID']);
-if (is_array($messageIdRaw)) {
-  $messageIds = array_values($messageIdRaw);
-} else {
-  $messageIds = $messageIdRaw !== null && $messageIdRaw !== '' ? [$messageIdRaw] : [];
-}
+handler_log('Extracted', ['connector' => $connector, 'line_id' => $lineId, 'message_id' => $messageIds, 'external_user_id' => $externalUserId ?: '(none)', 'external_chat_id' => $externalChatId]);
 
-handler_log('Extracted', ['connector' => $connector, 'line_id' => $lineId, 'message_id' => $messageIds, 'external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId]);
-
-if ($connector === '' || $lineId === '' || $text === '' || $externalUserId === '' || $externalChatId === '') {
-  handler_log('Missing data', ['connector' => $connector, 'line_id' => $lineId, 'has_text' => $text !== '', 'external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId]);
-  json_response(['ok' => false, 'error' => 'Missing connector, line, message text, or user/chat id']);
+if ($connector === '' || $lineId === '' || $text === '' || $externalChatId === '') {
+  handler_log('Missing data', ['connector' => $connector, 'line_id' => $lineId, 'has_text' => $text !== '', 'external_chat_id' => $externalChatId]);
+  json_response(['ok' => false, 'error' => 'Missing connector, line, message text, or external chat id']);
   exit;
 }
 
@@ -150,11 +194,33 @@ if (!$portal) {
   exit;
 }
 
-handler_log('Resolve peer', ['portal' => $portal, 'external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId]);
+handler_log('Resolve peer', ['portal' => $portal, 'external_chat_id' => $externalChatId, 'external_user_id' => $externalUserId ?: '(none)']);
 
-$mapping = ol_map_resolve_to_peer($portal, $externalUserId, $externalChatId);
+$mapping = ol_map_find_by_chat_id($portal, $externalChatId);
+if (!$mapping && $externalUserId !== '') {
+  $mapping = ol_map_resolve_to_peer($portal, $externalUserId, $externalChatId);
+}
 if (!$mapping) {
-  handler_log('No ol_map', ['portal' => $portal, 'external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId]);
+  handler_log('No ol_map', ['portal' => $portal, 'external_chat_id' => $externalChatId]);
+  try {
+    $auth = b24_get_stored_auth($portal);
+    if ($auth && !empty($messageIds) && $externalChatId !== '') {
+      @b24_call('imconnector.send.status.undelivered', [
+        'CONNECTOR' => $connectorId,
+        'LINE' => (int)$lineId,
+        'MESSAGES' => [
+          array_filter([
+            'message' => ['id' => $messageIds],
+            'chat' => ['id' => $externalChatId],
+            'im' => is_array($im) ? $im : null,
+          ]),
+        ],
+      ], $auth);
+      handler_log('undelivered sent (no mapping)', []);
+    }
+  } catch (Throwable $e2) {
+    handler_log('undelivered status failed', ['error' => $e2->getMessage()]);
+  }
   json_response(['ok' => false, 'error' => 'No mapping for this chat. Send a message from Telegram first so the chat is linked.']);
   exit;
 }

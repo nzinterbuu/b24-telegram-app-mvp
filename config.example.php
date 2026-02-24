@@ -37,4 +37,7 @@ return [
   // Optional: path for Open Lines chat deep link (first-message notification). Use {CHAT_ID} as placeholder.
   // Default: /online/im/chat/{CHAT_ID}/ . If your portal uses another path under /online/, set e.g. '/online/im/chat/{CHAT_ID}/' or '/online/?dialog=im&chatId={CHAT_ID}'.
   'OPENLINES_CHAT_PATH' => '/online/im/chat/{CHAT_ID}/',
+
+  // Optional: token to allow debug endpoint ajax/debug_ol_map.php (query ol_map by portal + external_chat_id or peer). Set env DEBUG_OL_MAP_TOKEN or this key.
+  'DEBUG_OL_MAP_TOKEN' => getenv('DEBUG_OL_MAP_TOKEN') ?: '',
 ];
