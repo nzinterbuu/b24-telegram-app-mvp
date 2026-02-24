@@ -228,14 +228,31 @@ if (!$mapping) {
 $tenantId = $mapping['tenant_id'];
 $peer = $mapping['peer'];
 
-$pdo = ensure_db();
-$stmt = $pdo->prepare("SELECT user_id, api_token FROM user_settings WHERE portal=? AND tenant_id=? LIMIT 1");
-$stmt->execute([$portal, $tenantId]);
-$row = $stmt->fetch(PDO::FETCH_ASSOC);
-$apiToken = $row ? ($row['api_token'] ?? null) : null;
+$creds = grey_get_tenant_credentials($portal, (string)$tenantId);
+$apiToken = $creds['api_token'] ?? null;
 
 if (!$apiToken) {
-  handler_log('No api_token for tenant', ['tenant_id' => $tenantId]);
+  handler_log('No api_token for tenant', ['tenant_id' => $tenantId, 'portal' => $portal]);
+  // Try to clear pending in Bitrix so operator sees an error instead of endless \"pending\"
+  try {
+    $auth = b24_get_stored_auth($portal);
+    if ($auth && !empty($messageIds) && $externalChatId !== '') {
+      @b24_call('imconnector.send.status.undelivered', [
+        'CONNECTOR' => $connectorId,
+        'LINE' => (int)$lineId,
+        'MESSAGES' => [
+          array_filter([
+            'message' => ['id' => $messageIds],
+            'chat' => ['id' => $externalChatId],
+            'im' => is_array($im) ? $im : null,
+          ]),
+        ],
+      ], $auth);
+      handler_log('undelivered sent (no api_token)', ['tenant_id' => $tenantId]);
+    }
+  } catch (Throwable $e2) {
+    handler_log('undelivered status failed (no api_token)', ['error' => $e2->getMessage()]);
+  }
   json_response(['ok' => false, 'error' => 'No API token for this tenant. Configure the app for this Telegram connection.']);
   exit;
 }

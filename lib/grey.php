@@ -83,3 +83,54 @@ function grey_call(string $tenantId, ?string $apiToken, string $path, string $me
   }
   return is_array($data) ? $data : ['raw'=>$raw];
 }
+
+/**
+ * Resolve Grey tenant credentials for outbound (Open Lines, deal send, etc.).
+ * Primary key is (portal, tenant_id) in user_settings; we fallback to any row with this tenant_id
+ * to be robust if portal was changed or not stored consistently.
+ */
+function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
+  $tenantId = trim($tenantId);
+  $portal = trim($portal);
+  if ($tenantId === '') return null;
+  $pdo = ensure_db();
+
+  // 1) Preferred: exact portal + tenant_id match
+  if ($portal !== '') {
+    $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE portal=? AND tenant_id=? LIMIT 1");
+    $stmt->execute([$portal, $tenantId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row && !empty($row['api_token'])) {
+      return [
+        'portal' => $row['portal'],
+        'tenant_id' => $row['tenant_id'],
+        'api_token' => $row['api_token'],
+        'user_id' => (int)($row['user_id'] ?? 0),
+        'phone' => $row['phone'] ?? null,
+      ];
+    }
+  }
+
+  // 2) Fallback: any tenant_id match (portal-agnostic) — Grey tenant is global, not per Bitrix portal
+  $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE tenant_id=? LIMIT 1");
+  $stmt->execute([$tenantId]);
+  $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  if ($row && !empty($row['api_token'])) {
+    if (cfg('DEBUG')) {
+      log_debug('grey_get_tenant_credentials fallback by tenant_id', [
+        'requested_portal' => $portal,
+        'stored_portal' => $row['portal'],
+        'tenant_id' => $tenantId,
+      ]);
+    }
+    return [
+      'portal' => $row['portal'],
+      'tenant_id' => $row['tenant_id'],
+      'api_token' => $row['api_token'],
+      'user_id' => (int)($row['user_id'] ?? 0),
+      'phone' => $row['phone'] ?? null,
+    ];
+  }
+
+  return null;
+}

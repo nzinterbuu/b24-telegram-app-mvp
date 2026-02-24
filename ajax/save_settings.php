@@ -21,6 +21,18 @@ try {
   ]);
 
   $portal = portal_key($auth);
+  // Safe debug log for saved Grey tenant (no full token)
+  if (cfg('DEBUG')) {
+    $tail = $apiToken && strlen($apiToken) >= 4 ? substr($apiToken, -4) : null;
+    $ctx = [
+      'portal' => $portal,
+      'user_id' => $userId,
+      'tenant_id' => $tenantId,
+      'token_tail' => $tail,
+      'has_token' => $apiToken !== null && $apiToken !== '',
+    ];
+    @error_log('[Settings] saved grey tenant ' . json_encode($ctx, JSON_UNESCAPED_UNICODE));
+  }
   if ($lineId !== null) {
     set_portal_line_id($portal, $lineId);
   }
