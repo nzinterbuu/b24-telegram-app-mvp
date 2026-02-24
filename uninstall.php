@@ -7,6 +7,7 @@ try {
   $auth = $data['auth'] ?? $_REQUEST;
   $public = rtrim(cfg('PUBLIC_URL'), '/');
 
+  $r0 = b24_call('placement.unbind', ['PLACEMENT'=>'CRM_DEAL_DETAIL_TOOLBAR','HANDLER'=>$public.'/deal_menu.php'], $auth);
   $r1 = b24_call('placement.unbind', ['PLACEMENT'=>'CRM_DEAL_DETAIL_TAB','HANDLER'=>$public.'/deal_tab.php'], $auth);
   $r2 = b24_call('placement.unbind', ['PLACEMENT'=>'CONTACT_CENTER','HANDLER'=>$public.'/contact_center.php'], $auth);
 
@@ -17,7 +18,7 @@ try {
     b24_delete_oauth_tokens($domain);
   }
 
-  json_response(['ok'=>true,'deal_tab'=>$r1,'contact_center'=>$r2]);
+  json_response(['ok'=>true,'deal_menu'=>$r0,'deal_tab'=>$r1,'contact_center'=>$r2]);
 } catch (Throwable $e) {
   log_debug("uninstall error", ['e'=>$e->getMessage()]);
   json_response(['ok'=>false,'error'=>$e->getMessage()], 400);

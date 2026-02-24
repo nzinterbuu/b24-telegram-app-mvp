@@ -193,7 +193,7 @@ function get_portal_openlines_last_inject(string $portal): ?array {
   return is_array($dec) ? ['at' => (int)($row['openlines_last_inject_at'] ?? 0)] + $dec : null;
 }
 
-/** Get or create ol_map entry: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). */
+/** Get or create ol_map entry: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). Returns is_new=true when the row was just created (first message from this peer). */
 function ol_map_get_or_create(string $portal, string $tenantId, string $peer): array {
   $pdo = ensure_db();
   $peer = trim($peer);
@@ -203,7 +203,7 @@ function ol_map_get_or_create(string $portal, string $tenantId, string $peer): a
   if ($row) {
     $now = time();
     $pdo->prepare("UPDATE ol_map SET updated_at=? WHERE portal=? AND tenant_id=? AND peer=?")->execute([$now, $portal, $tenantId, $peer]);
-    return ['external_user_id' => $row['external_user_id'], 'external_chat_id' => $row['external_chat_id']];
+    return ['external_user_id' => $row['external_user_id'], 'external_chat_id' => $row['external_chat_id'], 'is_new' => false];
   }
   $key = $portal . '|' . $tenantId . '|' . $peer;
   $externalUserId = 'tg_u_' . sha1($key);
@@ -211,7 +211,7 @@ function ol_map_get_or_create(string $portal, string $tenantId, string $peer): a
   $now = time();
   $ins = $pdo->prepare("INSERT INTO ol_map (portal, tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)");
   $ins->execute([$portal, $tenantId, $peer, $externalUserId, $externalChatId, $now, $now]);
-  return ['external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId];
+  return ['external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId, 'is_new' => true];
 }
 
 /** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. */

@@ -5,10 +5,12 @@ require_once __DIR__ . '/lib/b24.php';
 $public = rtrim(cfg('PUBLIC_URL'), '/');
 
 function install_unbind_placements(array $auth, string $public): void {
-  foreach (
-    [['PLACEMENT' => 'CRM_DEAL_DETAIL_TAB', 'HANDLER' => $public . '/deal_tab.php'], ['PLACEMENT' => 'CONTACT_CENTER', 'HANDLER' => $public . '/contact_center.php']]
-    as $p
-  ) {
+  $placements = [
+    ['PLACEMENT' => 'CRM_DEAL_DETAIL_TAB', 'HANDLER' => $public . '/deal_tab.php'],
+    ['PLACEMENT' => 'CRM_DEAL_DETAIL_TOOLBAR', 'HANDLER' => $public . '/deal_menu.php'],
+    ['PLACEMENT' => 'CONTACT_CENTER', 'HANDLER' => $public . '/contact_center.php'],
+  ];
+  foreach ($placements as $p) {
     try {
       b24_call('placement.unbind', $p, $auth);
     } catch (Throwable $e) {
@@ -78,7 +80,7 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
       ]);
     }
 
-    json_response(['ok' => true, 'deal_tab' => $res1, 'contact_center' => $res2]);
+    json_response(['ok' => true, 'deal_menu' => $resMenu, 'deal_tab' => $res1, 'contact_center' => $res2]);
     exit;
   } catch (Throwable $e) {
     log_debug("install ajax error", ['e' => $e->getMessage()]);
@@ -99,19 +101,27 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
       throw new Exception('Only a Bitrix24 administrator can install this app. Please log in as an administrator.');
     }
     install_unbind_placements($auth, $public);
+    $resMenu = b24_call('placement.bind', [
+      'PLACEMENT' => 'CRM_DEAL_DETAIL_TOOLBAR',
+      'HANDLER'   => $public . '/deal_menu.php',
+      'TITLE'     => 'Telegram Chat',
+      'DESCRIPTION' => 'Chat with client via Telegram',
+      'GROUP_NAME' => 'communication',
+      'OPTIONS'   => ['width' => 600, 'height' => 500],
+    ], $auth);
     $res1 = b24_call('placement.bind', [
       'PLACEMENT' => 'CRM_DEAL_DETAIL_TAB',
       'HANDLER'   => $public . '/deal_tab.php',
       'TITLE'     => 'Telegram Chat',
       'DESCRIPTION' => 'Chat with client via Telegram',
-      'OPTIONS'   => ['width' => 800, 'height' => 600]
+      'OPTIONS'   => ['width' => 800, 'height' => 600],
     ], $auth);
     $res2 = b24_call('placement.bind', [
       'PLACEMENT' => 'CONTACT_CENTER',
       'HANDLER'   => $public . '/contact_center.php',
       'TITLE'     => 'Telegram (GreyTG)',
       'DESCRIPTION' => 'Chat with customer via Telegram',
-      'OPTIONS'   => ['width' => 980, 'height' => 900]
+      'OPTIONS'   => ['width' => 980, 'height' => 900],
     ], $auth);
 
     $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';

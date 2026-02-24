@@ -792,6 +792,37 @@ try {
         $olChatId = $first['session']['CHAT_ID'] ?? $first['session']['chat_id'] ?? null;
         log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer, 'session_id' => $sessionId, 'chat_id' => $olChatId]);
         set_portal_openlines_last_inject($portal, true, ['session_id' => $sessionId, 'chat_id' => $olChatId]);
+
+        // First inbound from this peer: notify operator with deep link to open the Open Lines chat
+        $isFirstMessage = !empty($ext['is_new']);
+        if ($isFirstMessage && $olChatId && $auth) {
+          $notifyUserId = $assigned ?? 0;
+          if (!$notifyUserId && $tenantId) {
+            $pdo = ensure_db();
+            $stmt = $pdo->prepare("SELECT user_id FROM user_settings WHERE tenant_id=? LIMIT 1");
+            $stmt->execute([$tenantId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) $notifyUserId = (int)$row['user_id'];
+          }
+          if (!$notifyUserId) {
+            $u = b24_call('user.get', ['filter' => ['ADMIN' => 'Y'], 'limit' => 1], $auth);
+            $notifyUserId = !empty($u['result'][0]['ID']) ? (int)$u['result'][0]['ID'] : 0;
+          }
+          if ($notifyUserId) {
+            $openLinesChatUrl = 'https://' . $portal . '/online/im/chat/' . (int)$olChatId . '/';
+            $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $peer);
+            try {
+              b24_call('im.notify', [
+                'to' => $notifyUserId,
+                'message' => "New Telegram chat from {$fromLabel}:\n" . mb_substr($text, 0, 200) . (mb_strlen($text) > 200 ? '…' : '') . "\n\nOpen chat: " . $openLinesChatUrl,
+                'message_out' => 'Y',
+              ], $auth);
+              log_debug('First-message notify sent with Open Lines link', ['to_user' => $notifyUserId, 'chat_id' => $olChatId]);
+            } catch (Throwable $e) {
+              log_debug('im.notify (first-message) failed', ['e' => $e->getMessage()]);
+            }
+          }
+        }
       }
     } catch (Throwable $e) {
       log_debug('imconnector.send.messages failed', ['e' => $e->getMessage(), 'portal' => $portal]);
