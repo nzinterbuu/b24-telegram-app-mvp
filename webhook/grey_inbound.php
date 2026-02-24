@@ -747,7 +747,7 @@ try {
       $messageId = 'tg_' . substr($ext['external_chat_id'], 0, 12) . '_' . time() . '_' . bin2hex(random_bytes(4));
       // Bitrix: name/last_name only letters, spaces, hyphens, apostrophes; max 25 chars each
       $rawDisplay = $senderUsername ? ('@' . ltrim($senderUsername, '@')) : ($isPhoneNumber ? ('Tel ' . $phone) : ('User ' . $peer));
-      $sanitized = preg_replace('/[^a-zA-Z\s\-'\p{L}]/u', '', $rawDisplay);
+      $sanitized = preg_replace("/[^a-zA-Z\\s\\-\\'\\p{L}]/u", '', $rawDisplay);
       $sanitized = trim($sanitized);
       if ($sanitized === '') $sanitized = 'Telegram';
       $name = mb_substr($sanitized, 0, 25);
