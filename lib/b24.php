@@ -100,6 +100,23 @@ function b24_get_first_portal(): ?string {
   return $row ? $row['portal'] : null;
 }
 
+/** Derive portal domain from B24_WEBHOOK_URL for logging/fallback. */
+function b24_portal_from_webhook(): ?string {
+  $webhook = rtrim(getenv('B24_WEBHOOK_URL') ?: cfg('B24_WEBHOOK_URL', ''), '/');
+  if ($webhook === '') return null;
+  $parts = parse_url($webhook);
+  if (!is_array($parts) || !isset($parts['host'])) return null;
+  return $parts['host'];
+}
+
+/** Portal key to use when logging messages (prefers OAuth portal, falls back to webhook host). */
+function b24_portal_for_log(): string {
+  $p = b24_get_first_portal();
+  if ($p) return $p;
+  $fromWebhook = b24_portal_from_webhook();
+  return $fromWebhook ?: 'unknown';
+}
+
 /** Resolve portal from OnImConnectorMessageAdd (or similar) event payload. Prefer member_id → portal from b24_oauth_tokens. */
 function b24_portal_from_event(array $payload): ?string {
   $memberId = $payload['member_id'] ?? $payload['MEMBER_ID'] ?? $payload['auth']['member_id'] ?? $payload['data']['member_id'] ?? null;

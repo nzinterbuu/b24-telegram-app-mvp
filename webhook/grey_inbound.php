@@ -799,7 +799,7 @@ try {
     }
   }
 
-  $portalForLog = b24_get_first_portal() ?: 'unknown';
+  $portalForLog = b24_portal_for_log();
   // Log with peer identifier (phone or Telegram user ID)
   $peerForLog = $phone ?: $chatId;
   message_log_insert('in', $portalForLog, $tenantId ? (string)$tenantId : null, $peerForLog, $text, $dealId, 'webhook', null);
@@ -808,7 +808,7 @@ try {
 
 } catch (Throwable $e) {
   log_debug('inbound error', ['e' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-  $portalForLog = b24_get_first_portal() ?: 'unknown';
+  $portalForLog = b24_portal_for_log();
   try {
     message_log_insert('in', $portalForLog, null, isset($phone) ? $phone : '', isset($text) ? $text : '', null, 'webhook', $e->getMessage());
   } catch (Throwable $t) { /* ignore */ }
