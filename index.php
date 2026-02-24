@@ -91,6 +91,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
   <div class="card">
     <h2>Open Lines (Contact Center)</h2>
     <p class="small">Select an Open Line so incoming Telegram messages create chats in Contact Center. Operators can reply from there.</p>
+    <div id="openlines_save_message" class="openlines-save-message" style="display:none; margin-bottom:8px; padding:8px 12px; border-radius:4px;"></div>
     <div class="row">
       <div>
         <label>Open Line</label>
@@ -106,6 +107,7 @@ require_once __DIR__ . '/lib/bootstrap.php';
     <div id="openlines_status_wrap" class="openlines-status-wrap" style="margin-top:12px;padding:10px;background:#f5f5f5;border-radius:6px;">
       <strong>Open Lines status</strong>
       <p class="small" id="openlines_status_text">Load settings to see connector and last injection.</p>
+      <p class="small" style="margin-top:8px;"><a href="pages/openlines_diagnostics.php">Open Lines diagnostics</a> — line ID, connector status, test message.</p>
     </div>
   </div>
 

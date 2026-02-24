@@ -28,6 +28,10 @@ try {
   if (!is_array($list)) {
     $list = [];
   }
+  // Bitrix may return associative array (id => config); normalize to indexed for dropdown
+  if (!empty($list) && !isset($list[0]) && !array_key_exists(0, $list)) {
+    $list = array_values($list);
+  }
 
   json_response(['ok' => true, 'lines' => $list]);
 } catch (Throwable $e) {

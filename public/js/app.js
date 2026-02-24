@@ -171,14 +171,32 @@ async function loadOpenLines(){
   }
 }
 
+function showOpenLinesMessage(text, isError) {
+  var elm = el('openlines_save_message');
+  if (!elm) return;
+  elm.textContent = text || '';
+  elm.style.display = text ? 'block' : 'none';
+  elm.style.background = isError ? '#f8d7da' : '#d4edda';
+  elm.style.color = isError ? '#721c24' : '#155724';
+  if (text) setTimeout(function(){ elm.style.display = 'none'; }, 6000);
+}
+
 async function saveOpenLine(){
+  showOpenLinesMessage('', false);
   try {
     var lineId = el('openline_select') ? el('openline_select').value : '';
     var data = await api('ajax/openlines_save.php', { line_id: lineId });
     setText('status_out', JSON.stringify(data, null, 2));
-    if (data.ok) loadSettings();
+    if (data.ok) {
+      showOpenLinesMessage(data.message || 'Open line was set successfully.', false);
+      loadSettings();
+    } else {
+      showOpenLinesMessage(data.error || data.message || 'Save failed.', true);
+    }
   } catch (e) {
-    setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
+    var err = e && e.message ? e.message : String(e);
+    setText('status_out', 'Error: ' + err);
+    showOpenLinesMessage(err, true);
   }
 }
 

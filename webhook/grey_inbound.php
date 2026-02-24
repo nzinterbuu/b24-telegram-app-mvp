@@ -738,12 +738,21 @@ try {
   $lineId = $portal ? get_portal_line_id($portal) : null;
   if (!$lineId && $portal) {
     log_debug('Open Lines not configured for portal', ['portal' => $portal]);
+    log_openlines('Open Lines not configured (no line_id for portal)', ['portal' => $portal]);
   }
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
   $peer = $phone;
   if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
       $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);
+      log_openlines('Inbound inject attempt', [
+        'portal' => $portal,
+        'line_id' => $lineId,
+        'connector_id' => $connectorId,
+        'external_user_id' => $ext['external_user_id'] ?? null,
+        'external_chat_id' => $ext['external_chat_id'] ?? null,
+        'tenant_id' => $tenantId,
+      ]);
       $messageId = 'tg_' . substr($ext['external_chat_id'], 0, 12) . '_' . time() . '_' . bin2hex(random_bytes(4));
       // Bitrix: name/last_name only letters, spaces, hyphens, apostrophes; max 25 chars each
       $rawDisplay = $senderUsername ? ('@' . ltrim($senderUsername, '@')) : ($isPhoneNumber ? ('Tel ' . $phone) : ('User ' . $peer));
@@ -767,6 +776,7 @@ try {
       $auth = b24_get_stored_auth($portal);
       if (!$auth) {
         log_debug('Open Lines injection skipped: no OAuth for portal', ['portal' => $portal]);
+        log_openlines('Injection skipped: no OAuth for portal', ['portal' => $portal]);
       } else {
         $result = b24_call('imconnector.send.messages', [
           'CONNECTOR' => $connectorId,
@@ -791,6 +801,7 @@ try {
         $sessionId = $first['session']['ID'] ?? $first['session']['id'] ?? null;
         $olChatId = $first['session']['CHAT_ID'] ?? $first['session']['chat_id'] ?? null;
         log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer, 'session_id' => $sessionId, 'chat_id' => $olChatId]);
+        log_openlines('Inbound injected OK', ['portal' => $portal, 'line_id' => $lineId, 'session_id' => $sessionId, 'external_chat_id' => $ext['external_chat_id'] ?? null]);
         set_portal_openlines_last_inject($portal, true, ['session_id' => $sessionId, 'chat_id' => $olChatId]);
 
         // First inbound from this peer: notify operator with deep link to open the Open Lines chat
@@ -827,8 +838,10 @@ try {
         }
       }
     } catch (Throwable $e) {
-      log_debug('imconnector.send.messages failed', ['e' => $e->getMessage(), 'portal' => $portal]);
-      set_portal_openlines_last_inject($portal, false, ['error' => $e->getMessage()]);
+      $errMsg = $e->getMessage();
+      log_debug('imconnector.send.messages failed', ['e' => $errMsg, 'portal' => $portal]);
+      log_openlines('imconnector.send.messages failed', ['portal' => $portal, 'line_id' => $lineId, 'error' => $errMsg]);
+      set_portal_openlines_last_inject($portal, false, ['error' => $errMsg]);
     }
   }
 

@@ -57,13 +57,16 @@ if (!empty($json['auth']) && is_array($json['auth'])) {
         'PLACEMENT_HANDLER' => $public . '/contact_center.php',
         'CHAT_GROUP' => 'N',
       ], $auth);
-      // Bind event so Bitrix24 calls our handler when operator sends a message in Open Line
-      b24_call('event.bind', [
-        'event' => 'OnImConnectorMessageAdd',
-        'handler' => $handlerUrl,
-      ], $auth);
     } catch (Throwable $ex) {
-      log_debug('imconnector.register/event.bind failed (optional)', ['e' => $ex->getMessage()]);
+      $msg = $ex->getMessage();
+      if (stripos($msg, 'already') === false && stripos($msg, 'exist') === false) {
+        log_debug('imconnector.register failed', ['e' => $msg]);
+      }
+    }
+    try {
+      b24_call('event.bind', ['event' => 'OnImConnectorMessageAdd', 'handler' => $handlerUrl], $auth);
+    } catch (Throwable $ex) {
+      log_debug('event.bind failed (optional)', ['e' => $ex->getMessage()]);
     }
 
     $norm = b24_normalize_auth($auth);
@@ -135,9 +138,16 @@ if (!empty($auth) && (isset($auth['domain']) || isset($auth['DOMAIN']) || isset(
         'PLACEMENT_HANDLER' => $public . '/contact_center.php',
         'CHAT_GROUP' => 'N',
       ], $auth);
+    } catch (Throwable $ex) {
+      $msg = $ex->getMessage();
+      if (stripos($msg, 'already') === false && stripos($msg, 'exist') === false) {
+        log_debug('imconnector.register failed', ['e' => $msg]);
+      }
+    }
+    try {
       b24_call('event.bind', ['event' => 'OnImConnectorMessageAdd', 'handler' => $handlerUrl], $auth);
     } catch (Throwable $ex) {
-      log_debug('imconnector.register/event.bind failed (optional)', ['e' => $ex->getMessage()]);
+      log_debug('event.bind failed (optional)', ['e' => $ex->getMessage()]);
     }
 
     $norm = b24_normalize_auth(is_array($auth) ? $auth : []);

@@ -148,6 +148,15 @@ function log_inbound_payload($payload): void {
   @file_put_contents($logFile, $line, FILE_APPEND);
 }
 
+/** Log Open Lines context to stderr (Render logs). No secrets. */
+function log_openlines(string $message, array $context = []): void {
+  $safe = [];
+  foreach (['portal', 'line_id', 'connector_id', 'external_user_id', 'external_chat_id', 'tenant_id', 'error', 'bitrix_error'] as $k) {
+    if (isset($context[$k])) $safe[$k] = $context[$k];
+  }
+  @error_log('[Open Lines] ' . $message . ($safe ? ' ' . json_encode($safe, JSON_UNESCAPED_UNICODE) : ''));
+}
+
 /** Get Open Line ID for portal (from DB or config fallback). */
 function get_portal_line_id(string $portal): ?string {
   $pdo = ensure_db();

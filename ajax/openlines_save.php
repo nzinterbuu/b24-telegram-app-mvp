@@ -40,13 +40,14 @@ try {
     ], $auth);
     set_portal_line_id($portal, $lineId);
     log_debug('Open Line saved and connector activated', ['portal' => $portal, 'line_id' => $lineId]);
+    json_response(['ok' => true, 'message' => 'Open line was set successfully.', 'line_id' => $lineId]);
   } else {
     set_portal_line_id($portal, '');
     log_debug('Open Line cleared', ['portal' => $portal]);
+    json_response(['ok' => true, 'message' => 'Open line cleared.', 'line_id' => '']);
   }
-
-  json_response(['ok' => true, 'line_id' => $lineId]);
 } catch (Throwable $e) {
   log_debug('openlines_save error', ['e' => $e->getMessage()]);
-  json_response(['ok' => false, 'error' => $e->getMessage()], 400);
+  $errMsg = $e->getMessage();
+  json_response(['ok' => false, 'error' => $errMsg, 'message' => $errMsg], 400);
 }
