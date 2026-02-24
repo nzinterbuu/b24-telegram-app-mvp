@@ -29,10 +29,17 @@ try {
   if ($tenantId !== null && $tenantId !== '') {
     $callbackUrl = rtrim(cfg('PUBLIC_URL'), '/') . '/webhook/grey_inbound.php';
     try {
-      grey_call($tenantId, $apiToken, '/callback', 'PUT', ['callback_url' => $callbackUrl]);
+      // Grey TG may use PATCH /tenants/{id} (partial update) instead of PUT /tenants/{id}/callback
+      grey_call($tenantId, $apiToken, '', 'PATCH', ['callback_url' => $callbackUrl]);
       $callbackSet = true;
     } catch (Throwable $e) {
-      log_debug('tenant callback set failed', ['tenant_id' => $tenantId, 'e' => $e->getMessage()]);
+      log_debug('tenant callback set failed (PATCH)', ['tenant_id' => $tenantId, 'e' => $e->getMessage()]);
+      try {
+        grey_call($tenantId, $apiToken, '/callback', 'PUT', ['callback_url' => $callbackUrl]);
+        $callbackSet = true;
+      } catch (Throwable $e2) {
+        log_debug('tenant callback set failed (PUT /callback)', ['tenant_id' => $tenantId, 'e' => $e2->getMessage()]);
+      }
     }
   }
 
