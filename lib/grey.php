@@ -2,6 +2,15 @@
 declare(strict_types=1);
 require_once __DIR__ . '/bootstrap.php';
 
+/**
+ * Update a Grey tenant (e.g. callback_url). Uses app-level server token.
+ * PATCH /tenants/{tenant_id} — body: { "name": "string", "callback_url": "string" } (Swagger: grey-tg.onrender.com/docs).
+ */
+function grey_update_tenant(string $tenantId, array $patchPayload): array {
+  $path = '/tenants/' . rawurlencode(trim($tenantId));
+  return grey_app_call($path, 'PATCH', $patchPayload);
+}
+
 /** App-level Grey API calls (no tenant in path): GET /tenants, POST /tenants. Optional server token from GREY_API_SERVER_TOKEN. */
 function grey_app_call(string $path, string $method = 'GET', ?array $body = null): array {
   $base = rtrim(cfg('GREY_API_BASE'), '/');

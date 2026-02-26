@@ -42,8 +42,15 @@ function ensure_db(): PDO {
       tenant_id TEXT,
       api_token TEXT,
       phone TEXT,
+      callback_set_at INTEGER,
+      callback_error TEXT,
       PRIMARY KEY (portal, user_id)
   )");
+  foreach (['callback_set_at', 'callback_error'] as $col) {
+    try {
+      $pdo->exec("ALTER TABLE user_settings ADD COLUMN " . $col . " " . ($col === 'callback_set_at' ? 'INTEGER' : 'TEXT'));
+    } catch (Throwable $e) { /* column may exist */ }
+  }
   $pdo->exec("CREATE TABLE IF NOT EXISTS b24_oauth_tokens (
       portal TEXT PRIMARY KEY,
       access_token TEXT NOT NULL,

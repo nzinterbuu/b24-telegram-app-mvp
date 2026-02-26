@@ -48,9 +48,21 @@ try {
     log_debug('Open Line saved and connector activated', ['portal' => $portal, 'line_id' => $lineId]);
     json_response(['ok' => true, 'message' => 'Open line was set successfully.', 'line_id' => $lineId]);
   } else {
+    $currentLineId = get_portal_line_id($portal);
+    if ($currentLineId !== null && $currentLineId !== '') {
+      try {
+        b24_call('imconnector.activate', [
+          'CONNECTOR' => $connectorId,
+          'LINE' => (int)$currentLineId,
+          'ACTIVE' => 0,
+        ], $auth);
+      } catch (Throwable $e) {
+        log_debug('imconnector.activate(0) failed', ['e' => $e->getMessage()]);
+      }
+    }
     set_portal_line_id($portal, '');
     log_debug('Open Line cleared', ['portal' => $portal]);
-    json_response(['ok' => true, 'message' => 'Open line cleared.', 'line_id' => '']);
+    json_response(['ok' => true, 'message' => 'Connector disconnected.', 'line_id' => '']);
   }
 } catch (Throwable $e) {
   log_debug('openlines_save error', ['e' => $e->getMessage()]);

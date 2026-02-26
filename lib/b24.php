@@ -281,17 +281,39 @@ function portal_key(array $auth): string {
 function db_get_user_settings(array $auth, int $userId): array {
   $portal = portal_key($auth);
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("SELECT tenant_id, api_token, phone FROM user_settings WHERE portal=? AND user_id=?");
+  $stmt = $pdo->prepare("SELECT tenant_id, api_token, phone, callback_set_at, callback_error FROM user_settings WHERE portal=? AND user_id=?");
   $stmt->execute([$portal, $userId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
-  return $row ?: ['tenant_id'=>null,'api_token'=>null,'phone'=>null];
+  if (!$row) return ['tenant_id'=>null,'api_token'=>null,'phone'=>null,'callback_set_at'=>null,'callback_error'=>null];
+  return [
+    'tenant_id' => $row['tenant_id'] ?? null,
+    'api_token' => $row['api_token'] ?? null,
+    'phone' => $row['phone'] ?? null,
+    'callback_set_at' => isset($row['callback_set_at']) ? (int)$row['callback_set_at'] : null,
+    'callback_error' => $row['callback_error'] ?? null,
+  ];
 }
 
 function db_save_user_settings(array $auth, int $userId, array $settings): void {
   $portal = portal_key($auth);
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("INSERT INTO user_settings (portal, user_id, tenant_id, api_token, phone)
-    VALUES (?,?,?,?,?)
+  $stmt = $pdo->prepare("INSERT INTO user_settings (portal, user_id, tenant_id, api_token, phone, callback_set_at, callback_error)
+    VALUES (?,?,?,?,?,?,?)
     ON CONFLICT(portal,user_id) DO UPDATE SET tenant_id=excluded.tenant_id, api_token=excluded.api_token, phone=excluded.phone");
-  $stmt->execute([$portal, $userId, $settings['tenant_id'] ?? null, $settings['api_token'] ?? null, $settings['phone'] ?? null]);
+  $stmt->execute([
+    $portal,
+    $userId,
+    $settings['tenant_id'] ?? null,
+    $settings['api_token'] ?? null,
+    $settings['phone'] ?? null,
+    isset($settings['callback_set_at']) ? (int)$settings['callback_set_at'] : null,
+    $settings['callback_error'] ?? null,
+  ]);
+}
+
+/** Update only callback status for diagnostics (do not overwrite token/tenant). */
+function db_update_callback_status(string $portal, int $userId, ?int $callbackSetAt, ?string $callbackError): void {
+  $pdo = ensure_db();
+  $stmt = $pdo->prepare("UPDATE user_settings SET callback_set_at=?, callback_error=? WHERE portal=? AND user_id=?");
+  $stmt->execute([$callbackSetAt, $callbackError, $portal, $userId]);
 }

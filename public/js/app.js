@@ -120,9 +120,6 @@ async function loadSettings(){
         if (!found && data.tenant_id) sel.innerHTML = '<option value="">— Select tenant —</option><option value="' + data.tenant_id + '" selected>Saved: ' + data.tenant_id + '</option>' + (sel.options.length > 2 ? '' : '');
       }
     }
-    if (el('openline_select') && data.line_id !== undefined) {
-      el('openline_select').value = data.line_id || '';
-    }
     var statusEl = el('openlines_status_text');
     if (statusEl) {
       var parts = [];
@@ -146,57 +143,19 @@ async function loadSettings(){
       statusEl.textContent = parts.join(' · ');
     }
     setText('status_out', JSON.stringify(data.status || {}, null, 2));
-  } catch (e) {
-    setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
-  }
-}
-
-async function loadOpenLines(){
-  var sel = el('openline_select');
-  if (!sel) return;
-  try {
-    var data = await api('ajax/openlines_list.php', {});
-    var lines = data.lines || [];
-    var current = sel.value || '';
-    sel.innerHTML = '<option value="">— None (Deal tab only) —</option>';
-    lines.forEach(function(l) {
-      var opt = document.createElement('option');
-      opt.value = l.ID || l.id || '';
-      opt.textContent = (l.LINE_NAME || l.line_name || 'Line ' + (l.ID || l.id)) + ' (ID: ' + (l.ID || l.id) + ')';
-      if (String(opt.value) === String(current)) opt.selected = true;
-      sel.appendChild(opt);
-    });
-  } catch (e) {
-    sel.innerHTML = '<option value="">— Error loading lines —</option>';
-  }
-}
-
-function showOpenLinesMessage(text, isError) {
-  var elm = el('openlines_save_message');
-  if (!elm) return;
-  elm.textContent = text || '';
-  elm.style.display = text ? 'block' : 'none';
-  elm.style.background = isError ? '#f8d7da' : '#d4edda';
-  elm.style.color = isError ? '#721c24' : '#155724';
-  if (text) setTimeout(function(){ elm.style.display = 'none'; }, 6000);
-}
-
-async function saveOpenLine(){
-  showOpenLinesMessage('', false);
-  try {
-    var lineId = el('openline_select') ? el('openline_select').value : '';
-    var data = await api('ajax/openlines_save.php', { line_id: lineId });
-    setText('status_out', JSON.stringify(data, null, 2));
-    if (data.ok) {
-      showOpenLinesMessage(data.message || 'Open line was set successfully.', false);
-      loadSettings();
-    } else {
-      showOpenLinesMessage(data.error || data.message || 'Save failed.', true);
+    var cbEl = el('callback_status');
+    if (cbEl) {
+      var at = data.callback_set_at;
+      var err = data.callback_error;
+      if (at) {
+        var when = new Date(at * 1000).toISOString().replace('T', ' ').slice(0, 19);
+        cbEl.textContent = 'Callback: set at ' + when + (err ? '. Last error: ' + err : '');
+      } else {
+        cbEl.textContent = 'Callback: not set' + (err ? '. Last error: ' + err : '');
+      }
     }
   } catch (e) {
-    var err = e && e.message ? e.message : String(e);
-    setText('status_out', 'Error: ' + err);
-    showOpenLinesMessage(err, true);
+    setText('status_out', 'Error: ' + (e && e.message ? e.message : String(e)));
   }
 }
 
@@ -307,6 +266,5 @@ async function loadMessageLog() {
 window.App = {
   loadSettings, saveSettings, refreshStatus, startOtp, resendOtp, verifyOtp, logout, sendFromDeal,
   loadTenants, onTenantSelectChange, showCreateTenant, hideCreateTenant, createTenant,
-  loadOpenLines, saveOpenLine,
   loadMessageLog
 };

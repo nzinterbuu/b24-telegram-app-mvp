@@ -37,16 +37,31 @@ try {
     set_portal_line_id($portal, $lineId);
   }
 
-  // Grey TG API (https://grey-tg.onrender.com/docs) does not expose an endpoint to update callback_url.
-  // callback_url can only be set when creating a tenant (POST /tenants). For existing tenants, set it in Grey TG admin or create a new tenant with the URL.
   $callbackUrl = rtrim(cfg('PUBLIC_URL'), '/') . '/webhook/grey_inbound.php';
+  $callbackSet = false;
+  $callbackError = null;
+
+  if ($tenantId !== null && $tenantId !== '' && $apiToken !== null && $apiToken !== '') {
+    try {
+      grey_update_tenant((string)$tenantId, ['callback_url' => $callbackUrl]);
+      db_update_callback_status($portal, $userId, time(), null);
+      $callbackSet = true;
+      if (cfg('DEBUG')) {
+        @error_log('[Settings] Grey callback_url set for tenant ' . substr((string)$tenantId, 0, 8) . '...');
+      }
+    } catch (Throwable $e) {
+      $callbackError = $e->getMessage();
+      db_update_callback_status($portal, $userId, null, $callbackError);
+      @error_log('[Settings] Grey callback_url update failed: ' . $callbackError);
+    }
+  }
 
   json_response([
     'ok' => true,
     'user_id' => $userId,
-    'callback_set' => false,
+    'callback_set' => $callbackSet,
     'callback_url' => $callbackUrl,
-    'callback_note' => 'Grey TG API does not support updating callback for existing tenants. Set this URL when creating a tenant, or in Grey TG admin.',
+    'callback_error' => $callbackError,
   ]);
 } catch (Throwable $e) {
   json_response(['error' => $e->getMessage(), 'message' => $e->getMessage()], 400);

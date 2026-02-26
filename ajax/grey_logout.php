@@ -11,8 +11,26 @@ try {
   $s = db_get_user_settings($auth, $userId);
   if (empty($s['tenant_id'])) throw new Exception("Tenant ID is not set. Save settings first.");
 
+  $tenantId = $s['tenant_id'];
+  $portal = portal_key($auth);
+
   $body = [];
-  $res = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/logout', 'POST', $body);
+  $res = grey_call($tenantId, $s['api_token'] ?? null, '/logout', 'POST', $body);
+  if (!is_array($res)) $res = [];
+
+  try {
+    grey_update_tenant($tenantId, ['callback_url' => '']);
+  } catch (Throwable $e) {
+    log_debug('Grey callback clear on disconnect failed', ['e' => $e->getMessage()]);
+  }
+
+  db_update_callback_status($portal, $userId, null, null);
+  db_save_user_settings($auth, $userId, [
+    'tenant_id' => null,
+    'api_token' => null,
+    'phone' => $s['phone'],
+  ]);
+
   json_response($res);
 } catch (Throwable $e) {
   json_response(['error'=>$e->getMessage(),'message'=>$e->getMessage()], 400);

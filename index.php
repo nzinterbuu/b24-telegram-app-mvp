@@ -90,23 +90,10 @@ require_once __DIR__ . '/lib/bootstrap.php';
 
   <div class="card">
     <h2>Open Lines (Contact Center)</h2>
-    <p class="small">Select an Open Line so incoming Telegram messages create chats in Contact Center. Operators can reply from there.</p>
-    <div id="openlines_save_message" class="openlines-save-message" style="display:none; margin-bottom:8px; padding:8px 12px; border-radius:4px;"></div>
-    <div class="row">
-      <div>
-        <label>Open Line</label>
-        <select id="openline_select">
-          <option value="">— None (Deal tab only) —</option>
-        </select>
-      </div>
-      <div>
-        <button type="button" onclick="App.saveOpenLine()">Save</button>
-      </div>
-    </div>
-    <div class="small" style="margin-top:8px;">If none is selected, messages still appear on the Deal tab and in notifications only.</div>
+    <p class="small">Configure the Telegram connector in <strong>Bitrix24 → Open Lines → Connectors</strong>. Open the Telegram (GreyTG) connector there to select an Open Line and connect. Incoming Telegram messages will create chats in Contact Center; operators reply from Open Lines.</p>
     <div id="openlines_status_wrap" class="openlines-status-wrap" style="margin-top:12px;padding:10px;background:#f5f5f5;border-radius:6px;">
-      <strong>Open Lines status</strong>
-      <p class="small" id="openlines_status_text">Load settings to see connector and last injection.</p>
+      <strong>Status</strong>
+      <p class="small" id="openlines_status_text">Load settings to see stored line and last injection.</p>
       <p class="small" style="margin-top:8px;"><a href="pages/openlines_diagnostics.php">Open Lines diagnostics</a> — line ID, connector status, test message.</p>
     </div>
   </div>
@@ -114,9 +101,10 @@ require_once __DIR__ . '/lib/bootstrap.php';
   <div class="card">
     <h2>Inbound webhook (receive messages)</h2>
     <div class="small">
-      Set the Grey tenant <strong>callback_url</strong> to this URL so incoming Telegram messages are received:
+      The app sets the Grey tenant <strong>callback_url</strong> automatically when you connect Telegram (Save after Verify). URL:
     </div>
     <p style="margin:8px 0;"><code><?= htmlspecialchars(cfg('PUBLIC_URL')."/webhook/grey_inbound.php") ?></code></p>
+    <div id="callback_status" class="small" style="margin-top:8px; padding:6px 10px; background:#f8f9fa; border-radius:4px;">Callback status: load settings to see.</div>
     <div class="small" style="margin-top:8px;">
       The Grey TG API only accepts <strong>callback_url</strong> when <strong>creating</strong> a tenant (not when saving settings). New tenants created in this app get this URL by default. For an <strong>existing</strong> tenant, set this URL in Grey TG admin or create a new tenant. Messages appear on the <strong>Deal</strong> (timeline), trigger an <strong>IM notification</strong>, and (if Open Line is configured) in <strong>Contact Center</strong>.
     </div>
@@ -129,7 +117,6 @@ BX24.init(function() {
   BX24.resizeWindow(980, 900);
   App.loadTenants()
     .then(function() { return App.loadSettings(); })
-    .then(function() { return App.loadOpenLines(); })
     .then(function() { return App.loadMessageLog(); })
     .catch(function(err) { document.getElementById('status_out').textContent = String(err); });
 });
