@@ -9,6 +9,10 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/b24.php';
 require_once __DIR__ . '/../lib/grey.php';
 
+// Hard access log first — any request must produce a log (diagnose "cannot be dispatched" / Bitrix not reaching us)
+$raw = file_get_contents('php://input');
+@error_log('[OpenLines Handler] HIT method=' . ($_SERVER['REQUEST_METHOD'] ?? '') . ' content_type=' . ($_SERVER['HTTP_CONTENT_TYPE'] ?? $_SERVER['CONTENT_TYPE'] ?? '') . ' remote=' . ($_SERVER['REMOTE_ADDR'] ?? '') . ' body_len=' . (is_string($raw) ? strlen($raw) : 0));
+
 function pick($a, array $keys) {
   if (!is_array($a)) return null;
   foreach ($keys as $k) {
@@ -82,7 +86,7 @@ function extract_external_ids(array $payload): array {
 /** Safe handler log to stderr (Render). No secrets. */
 function handler_log(string $msg, array $ctx = []): void {
   $safe = [];
-  $allowed = ['method', 'content_type', 'payload_keys', 'parse_mode', 'event', 'connector', 'line_id', 'message_id', 'external_user_id', 'external_chat_id', 'portal', 'grey_ok', 'delivery_ok', 'delivery_sent', 'error'];
+  $allowed = ['method', 'content_type', 'payload_keys', 'parse_mode', 'event', 'data_keys', 'connector', 'line_id', 'message_id', 'external_user_id', 'external_chat_id', 'portal', 'grey_ok', 'delivery_ok', 'delivery_sent', 'error'];
   foreach ($allowed as $k) {
     if (array_key_exists($k, $ctx)) $safe[$k] = $ctx[$k];
   }
@@ -93,7 +97,6 @@ header('Content-Type: application/json; charset=utf-8');
 
 // ——— 1) Parse input: JSON or application/x-www-form-urlencoded / multipart ———
 $contentType = $_SERVER['HTTP_CONTENT_TYPE'] ?? $_SERVER['CONTENT_TYPE'] ?? '';
-$raw = file_get_contents('php://input');
 $payload = null;
 $parseMode = 'none';
 
@@ -139,14 +142,15 @@ if (!is_array($payload)) {
 handler_log('Request', ['method' => $_SERVER['REQUEST_METHOD'] ?? '', 'content_type' => $contentType, 'parse_mode' => $parseMode, 'payload_keys' => array_keys($payload)]);
 
 $event = pick($payload, ['event', 'EVENT']);
+$data = $payload['data'] ?? $payload['DATA'] ?? $payload;
+if (!is_array($data)) $data = [];
+handler_log('Event/data', ['event' => $event, 'data_keys' => array_keys($data)]);
+
 if ($event !== 'OnImConnectorMessageAdd' && $event !== 'ONIMCONNECTORMESSAGEADD') {
   handler_log('Unsupported event', ['event' => $event]);
   json_response(['ok' => false, 'error' => 'Unsupported event']);
   exit;
 }
-
-$data = $payload['data'] ?? $payload['DATA'] ?? $payload;
-if (!is_array($data)) $data = [];
 
 $connector = (string)pick($data, ['connector', 'CONNECTOR']);
 $lineId = (string)pick($data, ['line', 'LINE', 'line_id', 'LINE_ID']);

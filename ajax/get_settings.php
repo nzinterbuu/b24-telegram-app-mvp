@@ -14,14 +14,22 @@ try {
   $s['line_id'] = get_portal_line_id($portal);
   $s['openlines_last_inject'] = get_portal_openlines_last_inject($portal);
   $s['connector_status'] = null;
+  $public = rtrim(cfg('PUBLIC_URL'), '/');
+  $s['openlines_handler_url'] = $public . '/openlines/handler.php';
   if (!empty($s['line_id'])) {
     try {
       $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
       $r = b24_call('imconnector.status', ['CONNECTOR' => $connectorId, 'LINE' => (int)$s['line_id']], $auth);
       $res = $r['result'] ?? $r['RESULT'] ?? [];
-      $s['connector_status'] = ['active' => (isset($res['register']) && $res['register']) || (isset($res['REGISTER']) && $res['REGISTER']) || !empty($res)];
+      $s['connector_status'] = [
+        'active' => (isset($res['register']) && $res['register']) || (isset($res['REGISTER']) && $res['REGISTER']) || !empty($res),
+        'configured' => $res['CONFIGURED'] ?? $res['configured'] ?? null,
+        'error' => $res['ERROR'] ?? $res['error'] ?? null,
+        'status' => $res['STATUS'] ?? $res['status'] ?? null,
+        'connector_id' => $connectorId,
+      ];
     } catch (Throwable $e) {
-      $s['connector_status'] = ['active' => false, 'error' => $e->getMessage()];
+      $s['connector_status'] = ['active' => false, 'error' => $e->getMessage(), 'connector_id' => $connectorId ?? null];
     }
   }
   $status = null;

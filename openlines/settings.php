@@ -39,6 +39,11 @@ $public = rtrim(cfg('PUBLIC_URL'), '/');
     <div id="status_wrap" class="ol-status" style="margin-top:12px;">
       <strong>Status</strong>
       <p id="status_text" class="small">Loading…</p>
+      <p id="handler_url" class="small" style="word-break:break-all;margin-top:6px;"></p>
+      <p id="connector_detail" class="small" style="margin-top:4px;"></p>
+    </div>
+    <div style="margin-top:12px;">
+      <button type="button" id="btn_reapply" class="secondary" onclick="reapplyConfig()" style="display:none;">Re-apply config</button>
     </div>
   </div>
 </div>
@@ -101,6 +106,9 @@ async function loadLines() {
 
 async function loadStatus() {
   var st = el('status_text');
+  var handlerEl = el('handler_url');
+  var detailEl = el('connector_detail');
+  var btnReapply = el('btn_reapply');
   try {
     var data = await api('ajax/get_settings.php');
     var lineId = data.line_id || '';
@@ -115,10 +123,43 @@ async function loadStatus() {
       }
     }
     st.textContent = parts.join(' · ');
+    handlerEl.textContent = data.openlines_handler_url ? 'Handler: ' + data.openlines_handler_url : '';
+    var detailParts = [];
+    if (data.connector_status) {
+      if (data.connector_status.configured != null) detailParts.push('configured=' + data.connector_status.configured);
+      if (data.connector_status.status != null) detailParts.push('status=' + data.connector_status.status);
+      if (data.connector_status.connector_id) detailParts.push('connector=' + data.connector_status.connector_id);
+    }
+    detailEl.textContent = detailParts.length ? detailParts.join(' · ') : '';
+    btnReapply.style.display = lineId ? 'inline-block' : 'none';
     var btnDisconnect = el('btn_disconnect');
     btnDisconnect.style.display = lineId ? 'inline-block' : 'none';
   } catch (e) {
     st.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+    handlerEl.textContent = '';
+    detailEl.textContent = '';
+    btnReapply.style.display = 'none';
+  }
+}
+
+async function reapplyConfig() {
+  var lineId = (el('line_select').value || window._currentLineId || '').trim();
+  if (!lineId) {
+    showMessage('Select an Open Line first.', true);
+    return;
+  }
+  showMessage('', false);
+  try {
+    var data = await api('ajax/openlines_save.php', { line_id: lineId });
+    if (data.ok) {
+      showMessage('Config re-applied (activate + connector data + event.bind).', false);
+      loadStatus();
+      loadLines();
+    } else {
+      showMessage(data.error || data.message || 'Failed', true);
+    }
+  } catch (e) {
+    showMessage(e && e.message ? e.message : String(e), true);
   }
 }
 

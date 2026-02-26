@@ -29,12 +29,13 @@ try {
       'LINE' => (int)$lineId,
       'ACTIVE' => 1,
     ], $auth);
+    // DATA.url = handler URL so Bitrix can POST outbound; url_im = contact center widget
     b24_call('imconnector.connector.data.set', [
       'CONNECTOR' => $connectorId,
       'LINE' => (int)$lineId,
       'DATA' => [
         'id' => 'grey_tg',
-        'url' => $public,
+        'url' => $handlerUrl,
         'url_im' => $public . '/contact_center.php',
         'name' => 'Telegram (GreyTG)',
       ],
@@ -45,7 +46,7 @@ try {
       log_debug('event.bind on save failed', ['e' => $e->getMessage()]);
     }
     set_portal_line_id($portal, $lineId);
-    log_debug('Open Line saved and connector activated', ['portal' => $portal, 'line_id' => $lineId]);
+    log_debug('Open Line saved and connector activated', ['portal' => $portal, 'line_id' => $lineId, 'handler_url' => $handlerUrl]);
     json_response(['ok' => true, 'message' => 'Open line was set successfully.', 'line_id' => $lineId]);
   } else {
     $currentLineId = get_portal_line_id($portal);
