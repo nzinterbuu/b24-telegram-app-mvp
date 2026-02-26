@@ -233,34 +233,13 @@ $tenantId = $mapping['tenant_id'];
 $peer = $mapping['peer'];
 
 $creds = grey_get_tenant_credentials($portal, (string)$tenantId);
+// Grey TG API may not require a token (see https://grey-tg.onrender.com/docs) — call with null token if none stored
 $apiToken = $creds['api_token'] ?? null;
-// When using portal fallback, creds may have a different tenant_id; use it for Grey so send works
 $sendTenantId = isset($creds['tenant_id']) ? (string)$creds['tenant_id'] : (string)$tenantId;
-
-if (!$apiToken) {
-  handler_log('No api_token for tenant', ['tenant_id' => $tenantId, 'portal' => $portal]);
-  // Try to clear pending in Bitrix so operator sees an error instead of endless \"pending\"
-  try {
-    $auth = b24_get_stored_auth($portal);
-    if ($auth && !empty($messageIds) && $externalChatId !== '') {
-      @b24_call('imconnector.send.status.undelivered', [
-        'CONNECTOR' => $connectorId,
-        'LINE' => (int)$lineId,
-        'MESSAGES' => [
-          array_filter([
-            'message' => ['id' => $messageIds],
-            'chat' => ['id' => $externalChatId],
-            'im' => is_array($im) ? $im : null,
-          ]),
-        ],
-      ], $auth);
-      handler_log('undelivered sent (no api_token)', ['tenant_id' => $tenantId]);
-    }
-  } catch (Throwable $e2) {
-    handler_log('undelivered status failed (no api_token)', ['error' => $e2->getMessage()]);
-  }
-  json_response(['ok' => false, 'error' => 'No API token for this tenant. Open the app in Bitrix24 → Settings, then save the API token for your Grey Telegram connection (tenant_id: ' . $tenantId . ').']);
-  exit;
+if (!$creds) {
+  // No user_settings row for this tenant/portal; still try Grey with tenant_id from ol_map and no token
+  $sendTenantId = (string)$tenantId;
+  handler_log('No user_settings for tenant, calling Grey without token', ['tenant_id' => $tenantId, 'portal' => $portal]);
 }
 
 $greyOk = false;

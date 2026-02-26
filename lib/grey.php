@@ -104,16 +104,16 @@ function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
   if ($tenantId === '') return null;
   $pdo = ensure_db();
 
-  // 1) Preferred: exact portal + tenant_id match
+  // 1) Preferred: exact portal + tenant_id match (return even if api_token empty — Grey API may not require token, see grey-tg.onrender.com/docs)
   if ($portal !== '') {
     $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE portal=? AND tenant_id=? LIMIT 1");
     $stmt->execute([$portal, $tenantId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    if ($row && !empty($row['api_token'])) {
+    if ($row) {
       return [
         'portal' => $row['portal'],
         'tenant_id' => $row['tenant_id'],
-        'api_token' => $row['api_token'],
+        'api_token' => !empty($row['api_token']) ? $row['api_token'] : null,
         'user_id' => (int)($row['user_id'] ?? 0),
         'phone' => $row['phone'] ?? null,
       ];
@@ -124,7 +124,7 @@ function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
   $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE tenant_id=? LIMIT 1");
   $stmt->execute([$tenantId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
-  if ($row && !empty($row['api_token'])) {
+  if ($row) {
     if (cfg('DEBUG')) {
       log_debug('grey_get_tenant_credentials fallback by tenant_id', [
         'requested_portal' => $portal,
@@ -135,15 +135,15 @@ function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
     return [
       'portal' => $row['portal'],
       'tenant_id' => $row['tenant_id'],
-      'api_token' => $row['api_token'],
+      'api_token' => !empty($row['api_token']) ? $row['api_token'] : null,
       'user_id' => (int)($row['user_id'] ?? 0),
       'phone' => $row['phone'] ?? null,
     ];
   }
 
-  // 3) Portal fallback: any configured connection on this portal (e.g. inbound used first_portal or token never saved for this tenant)
+  // 3) Portal fallback: any row on this portal (tenant_id may differ; api_token optional — Grey may not require it)
   if ($portal !== '') {
-    $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE portal=? AND (api_token IS NOT NULL AND api_token != '') LIMIT 1");
+    $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE portal=? LIMIT 1");
     $stmt->execute([$portal]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if ($row) {
@@ -155,7 +155,7 @@ function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
       return [
         'portal' => $row['portal'],
         'tenant_id' => $row['tenant_id'],
-        'api_token' => $row['api_token'],
+        'api_token' => !empty($row['api_token']) ? $row['api_token'] : null,
         'user_id' => (int)($row['user_id'] ?? 0),
         'phone' => $row['phone'] ?? null,
       ];
