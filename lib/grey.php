@@ -94,6 +94,39 @@ function grey_call(string $tenantId, ?string $apiToken, string $path, string $me
 }
 
 /**
+ * Normalize peer for Grey API /messages/send.
+ * Grey expects: "me", @username, numeric user/chat id, or phone E.164 (e.g. +79001234567).
+ * Deal path uses E.164 phone. Use this in inbound storage and outbound so peer format is consistent.
+ * Returns: E.164 when input looks like a phone (starts with + or 11+ digits); @username as-is; else as-is (e.g. numeric Telegram id).
+ */
+function grey_normalize_peer(?string $peer): string {
+  $peer = trim((string)$peer);
+  if ($peer === '') return '';
+  if (preg_match('/^@[\w.]+\s*$/u', $peer)) return $peer;
+  $digits = preg_replace('/[^0-9+]/', '', $peer);
+  $hasPlus = strpos($peer, '+') !== false;
+  if ($hasPlus && strlen($digits) >= 10) {
+    if ($digits[0] !== '+') $digits = '+' . ltrim($digits, '0');
+    return $digits;
+  }
+  if (!$hasPlus && strlen($digits) >= 11) {
+    return '+' . ltrim($digits, '0');
+  }
+  return $peer;
+}
+
+/**
+ * Return true if peer is in a format known to work with Grey send (E.164 or @username). Digits-only may cause invalid_peer.
+ */
+function grey_peer_likely_sendable(string $peer): bool {
+  $peer = trim($peer);
+  if ($peer === '') return false;
+  if (preg_match('/^@[\w.]+\s*$/u', $peer)) return true;
+  if (preg_match('/^\+\d{10,}$/', preg_replace('/\s/', '', $peer))) return true;
+  return false;
+}
+
+/**
  * Resolve Grey tenant credentials for outbound (Open Lines, deal send, etc.).
  * Primary key is (portal, tenant_id) in user_settings; we fallback to any row with this tenant_id
  * to be robust if portal was changed or not stored consistently.

@@ -330,14 +330,7 @@ try {
     throw new Exception("Cannot parse inbound payload: message text is missing. Received keys: " . implode(', ', array_keys($payload)));
   }
   
-  // If no phone but we have chatid, use chatid as identifier (Telegram user ID)
-  // Only do this when we truly have no phone - never overwrite a real phone with chat_id
-  $digitsOnlyForCheck = $phone ? preg_replace('/[^0-9]/', '', (string)$phone) : '';
-  $hasRealPhone = $phone && (strpos((string)$phone, '+') === 0 ? strlen($digitsOnlyForCheck) >= 10 : strlen($digitsOnlyForCheck) >= 11);
-  if (!$hasRealPhone && $chatId) {
-    $phone = $chatId;
-    log_debug('Using Telegram user ID as identifier (no phone available)', ['chatid' => $chatId]);
-  }
+  // Do not set phone = chatId here — we try to resolve phone from Grey API first (below) when we have chatId but no real phone.
   
   // Final check: we need either phone or chatid to proceed
   if (!$phone && !$chatId) {
@@ -464,6 +457,12 @@ try {
   if ($resolvedPhone) {
     $phone = $resolvedPhone;
     log_debug('Using phone resolved from Grey API', ['original_chat_id' => $chatId, 'resolved_phone' => $phone]);
+  }
+
+  // Fallback: use chatId as identifier when we have no phone (Telegram user ID) — after Grey API resolution so we try to get E.164 first
+  if (!$phone && $chatId) {
+    $phone = $chatId;
+    log_debug('Using Telegram user ID as identifier (no phone available)', ['chatid' => $chatId]);
   }
 
   // Determine if $phone is actually a phone number or a Telegram user ID
@@ -741,7 +740,9 @@ try {
     log_openlines('Open Lines not configured (no line_id for portal)', ['portal' => $portal]);
   }
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
-  $peer = $phone;
+  // Store the exact peer string Grey expects for outbound (E.164 or @username when possible; same format Deal uses)
+  $peer = grey_normalize_peer($phone ?: $chatId ?: '');
+  if ($peer === '') $peer = $phone ?: $chatId ?: '';
   if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
     try {
       $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);

@@ -28,8 +28,12 @@ Operator replies from Bitrix24 Open Lines (Messenger → Chats) are delivered to
 | **ajax/get_settings.php** | Returns **openlines_handler_url** and enriched **connector_status** (configured, error, status, connector_id) from imconnector.status for current line. |
 | **openlines/settings.php** | Shows handler URL, connector detail (configured/status), and **Re-apply config** button that re-sends openlines_save with current line_id. |
 | **ajax/test_openlines_outbound.php** | Protected POST: builds minimal OnImConnectorMessageAdd from real ol_map row (portal + optional external_chat_id), POSTs to handler URL, returns handler response. Confirms send path without Bitrix. |
+| **lib/grey.php** | **grey_normalize_peer($peer)** for E.164 / @username / numeric id. **grey_peer_likely_sendable($peer)** to reject digits-only before Grey send. |
+| **webhook/grey_inbound.php** | Resolve phone from Grey API when chatId but no phone; then **peer = grey_normalize_peer(phone ?: chatId)** for ol_map (same format as Deal). After **ol_map_get_or_create()**, log **`[Inbound->OL] map saved`** with portal, peer, external_chat_id. |
+| **openlines/handler.php** | Get peer from ol_map; **grey_normalize_peer**; reject if !**grey_peer_likely_sendable** (undelivered + 200). Send to Grey; **imconnector.send.status.delivery** on success, **undelivered** on failure or invalid peer. |
+| **openlines/diag_chat.php** | GET ?token=...&portal=...&external_chat_id=... (DEBUG_OL_MAP_TOKEN). Shows tenant_id, stored peer, normalized peer, Grey sendable? |
+| **ajax/deal_send.php**, **ajax/send_message.php** | Use **grey_normalize_peer** for peer sent to Grey. |
 | **ajax/debug_openlines_event.php** | POST event_payload to test handler. |
-| **webhook/grey_inbound.php** | After **ol_map_get_or_create()**, log **`[Inbound->OL] map saved`** with portal, peer, external_chat_id, external_user_id. |
 | **ajax/debug_ol_map.php** | GET ?token=...&portal=...&external_chat_id=... or &peer=... (DEBUG_OL_MAP_TOKEN). Returns ol_map rows. |
 | **config.example.php** | Optional **DEBUG_OL_MAP_TOKEN**. |
 
@@ -51,6 +55,25 @@ Operator replies from Bitrix24 Open Lines (Messenger → Chats) are delivered to
 
 5. **Bitrix no longer shows “message not delivered”**  
    The message in Bitrix Open Lines chat shows as delivered, not “сообщение не доставлено”.
+
+---
+
+## Peer format (invalid_peer fix)
+
+**Grey expects peer as:** E.164 phone (e.g. `+79001234567`), or `@username`, or numeric user/chat id. The **Deal path** uses **E.164 phone** from CRM contact (normalize_phone → Grey). Open Lines outbound must use the **same peer string** stored when the chat was created (inbound).
+
+**Changes:**
+- **lib/grey.php**: **grey_normalize_peer($peer)** — normalizes to E.164 when input looks like phone; leaves @username and numeric id as-is. **grey_peer_likely_sendable($peer)** — true for E.164 or @username (digits-only often causes invalid_peer).
+- **webhook/grey_inbound.php**: Try to **resolve phone from Grey API** when we have chatId but no phone (before using chatId as identifier). Store **peer = grey_normalize_peer(phone ?: chatId)** so ol_map has E.164 or @ when possible.
+- **openlines/handler.php**: Resolve **peer** from ol_map only; **grey_normalize_peer** before send; **reject** when !grey_peer_likely_sendable (log, call **imconnector.send.status.undelivered**, return 200 + error). On Grey send failure, call undelivered (already done).
+- **ajax/deal_send.php**, **ajax/send_message.php**: Use **grey_normalize_peer** for peer sent to Grey (same format as Open Lines).
+- **openlines/diag_chat.php**: GET `?token=...&portal=...&external_chat_id=...` shows mapped tenant_id, stored peer, normalized peer, and whether peer is Grey-sendable (DEBUG_OL_MAP_TOKEN required).
+
+**Test checklist (peer fix):**
+1. **Inbound creates chat** — Send a message from Telegram (with phone in payload or resolvable from Grey). Inbound runs; ol_map stores peer in E.164 or @username when possible.
+2. **Reply in Open Lines sends to Grey** — Reply from Open Lines; handler uses ol_map.peer; Grey send succeeds; confirm in Grey history.
+3. **Bitrix marks message delivered** — Handler calls imconnector.send.status.delivery; Bitrix shows delivered.
+4. **Existing chats with digits-only peer** — Open `openlines/diag_chat.php?token=...&portal=...&external_chat_id=tg_c_...`. If “Grey sendable? No”, send a **new** message from Telegram so the chat is re-linked with E.164 or @username.
 
 ---
 

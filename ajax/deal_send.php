@@ -66,8 +66,9 @@ try {
     if (!$phone) throw new Exception("Invalid phone number.");
   }
 
+  $peer = grey_normalize_peer($phone) ?: $phone;
   $sent = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/messages/send', 'POST', [
-    'peer' => $phone,
+    'peer' => $peer,
     'text' => $text,
     'allow_import_contact' => true
   ]);
@@ -82,9 +83,9 @@ try {
     ]);
   }
 
-  message_log_insert('out', portal_key($auth), $s['tenant_id'], $phone, $text, $dealId ?: null, $dealId ? 'deal_tab' : 'contact_center', null);
+  message_log_insert('out', portal_key($auth), $s['tenant_id'], $peer, $text, $dealId ?: null, $dealId ? 'deal_tab' : 'contact_center', null);
 
-  json_response(['ok'=>true,'phone'=>$phone,'grey'=>$sent]);
+  json_response(['ok'=>true,'phone'=>$phone,'peer'=>$peer,'grey'=>$sent]);
 
 } catch (Throwable $e) {
   json_response(['ok'=>false,'error'=>$e->getMessage(),'message'=>$e->getMessage()], 400);

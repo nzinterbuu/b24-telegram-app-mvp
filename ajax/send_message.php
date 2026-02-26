@@ -24,16 +24,15 @@ try {
   $s = db_get_user_settings($auth, $userId);
   if (empty($s['tenant_id'])) throw new Exception("Select a tenant in the app first.");
 
-  $peerNormalized = (strpos($peer, '+') !== false || preg_match('/^\d+$/', $peer)) ? normalize_phone($peer) : $peer;
-  if (!$peerNormalized && $peer !== '') $peerNormalized = $peer;
+  $peerNormalized = grey_normalize_peer($peer) ?: $peer;
 
   $sent = grey_call($s['tenant_id'], $s['api_token'] ?? null, '/messages/send', 'POST', [
-    'peer' => $peerNormalized ?? $peer,
+    'peer' => $peerNormalized,
     'text' => $text,
     'allow_import_contact' => true
   ]);
 
-  message_log_insert('out', portal_key($auth), $s['tenant_id'], $peerNormalized ?? $peer, $text, null, 'contact_center', null);
+  message_log_insert('out', portal_key($auth), $s['tenant_id'], $peerNormalized, $text, null, 'contact_center', null);
 
   json_response(['ok' => true, 'peer' => $peer, 'grey' => $sent]);
 } catch (Throwable $e) {
