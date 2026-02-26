@@ -66,6 +66,7 @@ header('Content-Type: text/html; charset=utf-8');
       <tr><th>created_at</th><td><?= isset($row['created_at']) && $row['created_at'] !== null ? date('Y-m-d H:i:s', (int)$row['created_at']) : '—' ?></td></tr>
       <tr><th>updated_at (last inbound/update)</th><td><?= isset($row['updated_at']) && $row['updated_at'] !== null ? date('Y-m-d H:i:s', (int)$row['updated_at']) : '—' ?></td></tr>
     </table>
+    <p><small>If Bitrix still shows “сообщение не доставлено” after a reply, check server logs for <code>[OpenLines Handler] Delivery status failed</code> or <code>message_id</code> (should be non-empty). Delivery is reported via <code>imconnector.send.status.delivery</code> with <code>im</code> from the event.</small></p>
   <?php endif; ?>
 </body>
 </html>

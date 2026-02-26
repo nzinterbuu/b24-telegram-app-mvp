@@ -8,6 +8,7 @@
 require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/b24.php';
 require_once __DIR__ . '/../lib/grey.php';
+require_once __DIR__ . '/../lib/text_sanitize.php';
 
 // Hard access log at very first line — any request must produce a log (diagnose "message not delivered" / Bitrix not reaching us). Grep: [OL HANDLER]
 $raw = file_get_contents('php://input');
@@ -25,7 +26,8 @@ function pick($a, array $keys) {
  * Extract external ids and Bitrix message id from OnImConnectorMessageAdd payload.
  * Bitrix may send internal user id (e.g. 1) for operator — so external_user_id is optional.
  * external_chat_id is the stable key we sent in imconnector.send.messages (chat.id).
- * Key paths: data.MESSAGES[0].chat.id, data.MESSAGES[0].user.id, data.MESSAGES[0].message.id (and DATA/MESSAGE/CHAT/USER variants).
+ * For delivery status, Bitrix requires forwarding 'im' (chat_id, message_id) from the event;
+ * message id can appear in data.MESSAGES[0].message.id, data.MESSAGES[0].im.message_id, or data.im.message_id.
  */
 function extract_external_ids(array $payload): array {
   $data = $payload['data'] ?? $payload['DATA'] ?? $payload;
@@ -69,24 +71,34 @@ function extract_external_ids(array $payload): array {
     $externalUserId = '';
   }
 
-  $messageIdRaw = pick($message, ['id', 'ID']);
-  if (is_array($messageIdRaw)) {
-    $b24MessageId = array_values($messageIdRaw);
-  } else {
-    $b24MessageId = $messageIdRaw !== null && $messageIdRaw !== '' ? [$messageIdRaw] : [];
+  // Bitrix delivery status requires message id (and im from event). Prefer im.message_id, then message.id.
+  $imObj = is_array($firstMsg['im'] ?? null) ? $firstMsg['im'] : (is_array($firstMsg['IM'] ?? null) ? $firstMsg['IM'] : (is_array($data['im'] ?? null) ? $data['im'] : (is_array($data['IM'] ?? null) ? $data['IM'] : null)));
+  $b24MessageId = [];
+  $imMsgId = $imObj !== null ? pick($imObj, ['message_id', 'messageId', 'MESSAGE_ID']) : null;
+  if ($imMsgId !== null && $imMsgId !== '') {
+    $b24MessageId = is_array($imMsgId) ? array_values($imMsgId) : [(string)$imMsgId];
+  }
+  if (empty($b24MessageId)) {
+    $messageIdRaw = pick($message, ['id', 'ID']);
+    if (is_array($messageIdRaw)) {
+      $b24MessageId = array_values($messageIdRaw);
+    } elseif ($messageIdRaw !== null && $messageIdRaw !== '') {
+      $b24MessageId = [(string)$messageIdRaw];
+    }
   }
 
   return [
     'external_chat_id' => $externalChatId,
     'external_user_id' => $externalUserId === '' ? null : $externalUserId,
     'b24_message_id' => $b24MessageId,
+    'im' => is_array($imObj) ? $imObj : null,
   ];
 }
 
 /** Safe handler log to stderr (Render). No secrets. */
 function handler_log(string $msg, array $ctx = []): void {
   $safe = [];
-  $allowed = ['method', 'content_type', 'payload_keys', 'parse_mode', 'event', 'data_keys', 'connector', 'line_id', 'message_id', 'external_user_id', 'external_chat_id', 'portal', 'grey_ok', 'delivery_ok', 'delivery_sent', 'error'];
+  $allowed = ['method', 'content_type', 'payload_keys', 'parse_mode', 'event', 'data_keys', 'connector', 'line_id', 'message_id', 'external_user_id', 'external_chat_id', 'portal', 'grey_ok', 'delivery_ok', 'delivery_sent', 'delivery_payload_keys', 'message_id_count', 'has_im', 'delivery_result', 'raw_len', 'clean_len', 'preview', 'error'];
   foreach ($allowed as $k) {
     if (array_key_exists($k, $ctx)) $safe[$k] = $ctx[$k];
   }
@@ -156,12 +168,12 @@ $connector = (string)pick($data, ['connector', 'CONNECTOR']);
 $lineId = (string)pick($data, ['line', 'LINE', 'line_id', 'LINE_ID']);
 $messages = $data['MESSAGES'] ?? $data['messages'] ?? null;
 $firstMsg = is_array($messages) && !empty($messages) ? $messages[0] : null;
-$im = $firstMsg['im'] ?? $firstMsg['IM'] ?? $data['im'] ?? $data['IM'] ?? null;
 
 $extracted = extract_external_ids($payload);
 $externalChatId = $extracted['external_chat_id'];
 $externalUserId = $extracted['external_user_id'] ?? '';
 $messageIds = $extracted['b24_message_id'];
+$im = $extracted['im'] ?? $firstMsg['im'] ?? $firstMsg['IM'] ?? $data['im'] ?? $data['IM'] ?? null;
 
 $message = [];
 if (is_array($firstMsg)) {
@@ -169,12 +181,12 @@ if (is_array($firstMsg)) {
 } else {
   $message = is_array($data['message'] ?? null) ? $data['message'] : (is_array($data['MESSAGE'] ?? null) ? $data['MESSAGE'] : []);
 }
-$text = trim((string)pick($message, ['text', 'TEXT', 'message', 'MESSAGE']));
+$rawText = trim((string)pick($message, ['text', 'TEXT', 'message', 'MESSAGE']));
 
 handler_log('Extracted', ['connector' => $connector, 'line_id' => $lineId, 'message_id' => $messageIds, 'external_user_id' => $externalUserId ?: '(none)', 'external_chat_id' => $externalChatId]);
 
-if ($connector === '' || $lineId === '' || $text === '' || $externalChatId === '') {
-  handler_log('Missing data', ['connector' => $connector, 'line_id' => $lineId, 'has_text' => $text !== '', 'external_chat_id' => $externalChatId]);
+if ($connector === '' || $lineId === '' || $rawText === '' || $externalChatId === '') {
+  handler_log('Missing data', ['connector' => $connector, 'line_id' => $lineId, 'has_text' => $rawText !== '', 'external_chat_id' => $externalChatId]);
   json_response(['ok' => false, 'error' => 'Missing connector, line, message text, or external chat id']);
   exit;
 }
@@ -266,6 +278,9 @@ if (!$creds) {
   handler_log('No user_settings for tenant, calling Grey without token', ['tenant_id' => $tenantId, 'portal' => $portal]);
 }
 
+$text = sanitize_openlines_text($rawText);
+handler_log('Outbound text', ['raw_len' => strlen($rawText), 'clean_len' => strlen($text), 'preview' => mb_substr($text, 0, 50) . (mb_strlen($text) > 50 ? '…' : '')]);
+
 $greyOk = false;
 $sent = null;
 try {
@@ -302,32 +317,42 @@ try {
 
 message_log_insert('out', $portal, $sendTenantId, $peerSend, $text, null, 'openlines', null);
 
-// ——— Mark delivered in Bitrix: message.id must be array; forward 'im' from event ———
+// ——— Mark delivered in Bitrix: CONNECTOR, LINE, MESSAGES with message.id (array), chat.id, and im from event ———
 $deliveryOk = false;
-if (!empty($messageIds)) {
-  $deliveryItem = [
-    'message' => ['id' => $messageIds],
-    'chat' => ['id' => $externalChatId],
-  ];
-  if (is_array($im)) {
-    $deliveryItem['im'] = $im;
+$deliveryError = null;
+$deliveryPayload = [
+  'CONNECTOR' => $connectorId,
+  'LINE' => (int)$lineId,
+  'MESSAGES' => [],
+];
+$deliveryItem = [
+  'message' => ['id' => $messageIds],
+  'chat' => ['id' => $externalChatId],
+];
+if (is_array($im)) {
+  $deliveryItem['im'] = $im;
+}
+$deliveryPayload['MESSAGES'] = [$deliveryItem];
+
+try {
+  $auth = b24_get_stored_auth($portal);
+  if ($auth) {
+    $deliveryResult = b24_call('imconnector.send.status.delivery', $deliveryPayload, $auth);
+    $deliveryOk = true;
+    handler_log('Delivery status OK', [
+      'delivery_ok' => true,
+      'delivery_payload_keys' => array_keys($deliveryPayload),
+      'message_id_count' => count($messageIds),
+      'has_im' => is_array($im),
+      'delivery_result' => isset($deliveryResult['result']) ? (is_bool($deliveryResult['result']) ? $deliveryResult['result'] : true) : (empty($deliveryResult['error']) ? true : false),
+    ]);
+  } else {
+    handler_log('No auth for delivery', []);
+    $deliveryError = 'No auth for portal';
   }
-  try {
-    $auth = b24_get_stored_auth($portal);
-    if ($auth) {
-      b24_call('imconnector.send.status.delivery', [
-        'CONNECTOR' => $connectorId,
-        'LINE' => (int)$lineId,
-        'MESSAGES' => [$deliveryItem],
-      ], $auth);
-      $deliveryOk = true;
-      handler_log('Delivery status OK', ['delivery_ok' => true]);
-    } else {
-      handler_log('No auth for delivery', []);
-    }
-  } catch (Throwable $e) {
-    handler_log('Delivery status failed', ['error' => $e->getMessage()]);
-  }
+} catch (Throwable $e) {
+  $deliveryError = $e->getMessage();
+  handler_log('Delivery status failed', ['error' => $deliveryError]);
 }
 
 json_response(['ok' => true, 'peer' => $peerSend, 'grey' => $sent, 'delivery_sent' => $deliveryOk]);
