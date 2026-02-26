@@ -232,13 +232,11 @@ if (!$mapping) {
 $tenantId = $mapping['tenant_id'];
 $peer = $mapping['peer'];
 
-$creds = grey_get_tenant_credentials($portal, (string)$tenantId);
-// Grey TG API may not require a token (see https://grey-tg.onrender.com/docs) — call with null token if none stored
+// Always use the tenant_id from ol_map for Grey — that tenant has the chat with this peer. Using another tenant (e.g. from portal fallback) causes "Cannot find any entity" for the peer.
+$sendTenantId = (string)$tenantId;
+$creds = grey_get_tenant_credentials($portal, $sendTenantId);
 $apiToken = $creds['api_token'] ?? null;
-$sendTenantId = isset($creds['tenant_id']) ? (string)$creds['tenant_id'] : (string)$tenantId;
 if (!$creds) {
-  // No user_settings row for this tenant/portal; still try Grey with tenant_id from ol_map and no token
-  $sendTenantId = (string)$tenantId;
   handler_log('No user_settings for tenant, calling Grey without token', ['tenant_id' => $tenantId, 'portal' => $portal]);
 }
 
