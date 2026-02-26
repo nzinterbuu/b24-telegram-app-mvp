@@ -42,8 +42,18 @@ $public = rtrim(cfg('PUBLIC_URL'), '/');
       <p id="handler_url" class="small" style="word-break:break-all;margin-top:6px;"></p>
       <p id="connector_detail" class="small" style="margin-top:4px;"></p>
     </div>
+    <div id="diagnostics_panel" class="ol-status" style="margin-top:16px; padding:12px;">
+      <strong>Diagnostics</strong>
+      <p class="small" style="margin-top:6px;">Expected URLs (from PUBLIC_URL):</p>
+      <ul class="small" style="margin:4px 0; padding-left:20px;">
+        <li>Event callback (outbound): <code id="url_callback" style="word-break:break-all;"></code></li>
+        <li>Settings UI: <code id="url_settings" style="word-break:break-all;"></code></li>
+        <li>Ping (reachability): <a id="url_ping" href="#" target="_blank" rel="noopener">open ping URL</a> — should return 200 and "pong"; logs <code>[OL PING]</code></li>
+      </ul>
+      <p class="small" style="margin-top:8px;">Bitrix uses the event callback URL to POST operator replies. If that URL is wrong or unreachable, Bitrix shows "message not delivered" and our handler never logs <code>[OL HANDLER]</code>.</p>
+    </div>
     <div style="margin-top:12px;">
-      <button type="button" id="btn_reapply" class="secondary" onclick="reapplyConfig()" style="display:none;">Re-apply config</button>
+      <button type="button" id="btn_reapply" class="secondary" onclick="reapplyConfig()" style="display:none;">Re-apply connector config</button>
     </div>
   </div>
 </div>
@@ -124,6 +134,15 @@ async function loadStatus() {
     }
     st.textContent = parts.join(' · ');
     handlerEl.textContent = data.openlines_handler_url ? 'Handler: ' + data.openlines_handler_url : '';
+    var urlCallback = el('url_callback');
+    var urlSettings = el('url_settings');
+    var urlPing = el('url_ping');
+    if (urlCallback) urlCallback.textContent = data.openlines_handler_url || '—';
+    if (urlSettings) urlSettings.textContent = data.openlines_settings_url || '—';
+    if (urlPing && data.openlines_ping_url) {
+      urlPing.href = data.openlines_ping_url;
+      urlPing.textContent = data.openlines_ping_url;
+    }
     var detailParts = [];
     if (data.connector_status) {
       if (data.connector_status.configured != null) detailParts.push('configured=' + data.connector_status.configured);

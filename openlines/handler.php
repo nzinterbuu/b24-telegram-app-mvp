@@ -9,9 +9,9 @@ require_once __DIR__ . '/../lib/bootstrap.php';
 require_once __DIR__ . '/../lib/b24.php';
 require_once __DIR__ . '/../lib/grey.php';
 
-// Hard access log first — any request must produce a log (diagnose "cannot be dispatched" / Bitrix not reaching us)
+// Hard access log at very first line — any request must produce a log (diagnose "message not delivered" / Bitrix not reaching us). Grep: [OL HANDLER]
 $raw = file_get_contents('php://input');
-@error_log('[OpenLines Handler] HIT method=' . ($_SERVER['REQUEST_METHOD'] ?? '') . ' content_type=' . ($_SERVER['HTTP_CONTENT_TYPE'] ?? $_SERVER['CONTENT_TYPE'] ?? '') . ' remote=' . ($_SERVER['REMOTE_ADDR'] ?? '') . ' body_len=' . (is_string($raw) ? strlen($raw) : 0));
+@error_log('[OL HANDLER] hit ' . date('c') . ' method=' . ($_SERVER['REQUEST_METHOD'] ?? '') . ' content_type=' . ($_SERVER['HTTP_CONTENT_TYPE'] ?? $_SERVER['CONTENT_TYPE'] ?? '') . ' remote=' . ($_SERVER['REMOTE_ADDR'] ?? '') . ' body_len=' . (is_string($raw) ? strlen($raw) : 0));
 
 function pick($a, array $keys) {
   if (!is_array($a)) return null;

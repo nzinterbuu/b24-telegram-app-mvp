@@ -16,6 +16,8 @@ try {
   $s['connector_status'] = null;
   $public = rtrim(cfg('PUBLIC_URL'), '/');
   $s['openlines_handler_url'] = $public . '/openlines/handler.php';
+  $s['openlines_settings_url'] = $public . '/openlines/settings.php';
+  $s['openlines_ping_url'] = $public . '/openlines/ping.php';
   if (!empty($s['line_id'])) {
     try {
       $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';

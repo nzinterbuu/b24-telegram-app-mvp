@@ -20,8 +20,10 @@ Operator replies from Bitrix24 Open Lines (Messenger → Chats) are delivered to
 |------|--------|
 | **lib/bootstrap.php** | Added index **idx_ol_map_portal_chat** on `(portal, external_chat_id)`. **ol_map_find_by_chat_id($portal, $externalChatId)** for lookup by chat id only. Also member_map table. |
 | **lib/b24.php** | **b24_portal_from_event($payload)**: resolve portal by `member_id` → `member_map.domain`, then `member_id` → `b24_oauth_tokens.portal`, then `domain`/`DOMAIN` from payload (including under `data`/`DATA`). No “first portal” inside this function. **b24_set_member_map($memberId, $domain)**: upsert into `member_map`. **b24_save_oauth_tokens()**: after saving tokens, if `member_id` present, call `b24_set_member_map()` so install/OAuth populates `member_map`. |
-| **openlines/handler.php** | **Hard access log** at very start (method, content_type, remote ip, body length) so any request produces a log. Parse JSON and form; log event + data keys; **extract_external_ids**; **ol_map_find_by_chat_id** then **ol_map_resolve_to_peer**; Grey send; **imconnector.send.status.delivery** / **undelivered**; always 200 + JSON. |
-| **openlines/ping.php** | Health check: always 200, logs “ping hit”. Use to verify Bitrix can reach the server (same host as handler). |
+| **openlines/handler.php** | **First line:** logs **`[OL HANDLER] hit`** + ISO date + method, content_type, remote, body_len (grep logs for this). Then parse JSON/form; log event + data keys; **extract_external_ids**; **ol_map_find_by_chat_id** → **ol_map_resolve_to_peer**; Grey send; **imconnector.send.status.delivery** / **undelivered**; always 200 + JSON. |
+| **openlines/ping.php** | Health check: always 200, body `{"ok":true,"pong":true}`. Logs **`[OL PING] hit`** + ISO date. Use to verify Bitrix can reach the server. |
+| **docs/B24_OPENLINES_CALLBACK_FIELDS.md** | MCP findings: DATA.url = event callback URL; event.bind(OnImConnectorMessageAdd, handler); what causes “message not delivered”. |
+| **openlines/settings.php** | **Diagnostics** panel: expected event callback URL, settings URL, clickable **ping URL** (opens in new tab, should show pong); Re-apply connector config button. |
 | **ajax/openlines_save.php** | **imconnector.activate** + **imconnector.connector.data.set** with **DATA.url = handler URL** (`/openlines/handler.php`), url_im = contact_center.php, then **event.bind**(OnImConnectorMessageAdd, handlerUrl). Ensures outbound handler URL is set in both DATA and event. |
 | **ajax/get_settings.php** | Returns **openlines_handler_url** and enriched **connector_status** (configured, error, status, connector_id) from imconnector.status for current line. |
 | **openlines/settings.php** | Shows handler URL, connector detail (configured/status), and **Re-apply config** button that re-sends openlines_save with current line_id. |
@@ -33,25 +35,22 @@ Operator replies from Bitrix24 Open Lines (Messenger → Chats) are delivered to
 
 ---
 
-## Test checklist (outbound “cannot be dispatched” fix)
+## Step-by-step reproduction + fix confirmation checklist
 
-1. **Open Lines settings: connector active + handler URL**  
-   Open the connector settings page (Open Lines → Connectors → Telegram GreyTG). Confirm Status shows “Connector: active” and “Handler: https://…/openlines/handler.php”. If not, click **Re-apply config** (with a line selected) and refresh.
+1. **Open Lines settings → Diagnostics shows correct handler URL**  
+   Open Open Lines → Connectors → Telegram (GreyTG). In **Diagnostics**, confirm “Event callback (outbound)” URL is `PUBLIC_URL/openlines/handler.php` (HTTPS). If connector is not active or URL looks wrong, click **Re-apply connector config** (with the correct line selected) and refresh.
 
-2. **Reachability**  
-   Open `https://YOUR_PUBLIC_URL/openlines/ping.php` in a browser or curl — must return 200 and `{"ok":true,"ping":"openlines"}`. Server logs should show “ping hit”.
+2. **Click ping URL → logs show [OL PING]**  
+   In Diagnostics, click the **ping** link (or open `PUBLIC_URL/openlines/ping.php`). Page must return 200 and show “pong”. In server (e.g. Render) logs, grep for **`[OL PING]`** — you must see a line like `[OL PING] hit 2025-02-13T...`. If not, Bitrix cannot reach your host.
 
-3. **Reply in Open Lines produces handler logs**  
-   Send a message from Telegram so a chat exists; reply from Open Lines. Immediately check logs: you must see `[OpenLines Handler] HIT method=POST ...` and then `Event/data`, `Extracted`, etc. If HIT never appears, Bitrix is not reaching the handler (check handler URL in Bitrix, HTTPS, firewall, event.bind).
+3. **Send a reply in Open Lines → logs show handler hit**  
+   Send a message from Telegram so a chat exists in Open Lines; then reply from Open Lines (Messenger → Chats). In server logs, grep for **`[OL HANDLER]`** — you must see a hit immediately (method=POST, body_len>0). If **`[OL HANDLER]`** never appears, Bitrix is not calling our event callback (wrong URL, connector inactive, or network/SSL).
 
-4. **Grey message history shows outbound**  
-   After a successful reply, Grey side should show the outbound message; our DB message_log and handler log show “Grey send OK” and “Delivery status OK”.
+4. **Grey history shows outbound**  
+   After a successful reply, Grey TG message history shows the outbound message; our handler log shows “Grey send OK” and “Delivery status OK”.
 
-5. **Bitrix message no longer “cannot be dispatched”**  
-   Once the handler is reached and delivery status is sent, the message in Bitrix should show as delivered, not “message cannot be dispatched”.
-
-6. **Test hook (optional)**  
-   POST to `ajax/test_openlines_outbound.php` with auth and optional `external_chat_id` / `text`. Response includes handler_http_code and handler_response; use to verify send path without Bitrix.
+5. **Bitrix no longer shows “message not delivered”**  
+   The message in Bitrix Open Lines chat shows as delivered, not “сообщение не доставлено”.
 
 ---
 
