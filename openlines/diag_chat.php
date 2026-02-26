@@ -24,12 +24,13 @@ if ($portal === '' || $externalChatId === '') {
 }
 
 $pdo = ensure_db();
-$stmt = $pdo->prepare("SELECT tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at FROM ol_map WHERE portal=? AND external_chat_id=? LIMIT 1");
+$stmt = $pdo->prepare("SELECT tenant_id, peer, peer_send, external_user_id, external_chat_id, created_at, updated_at FROM ol_map WHERE portal=? AND external_chat_id=? LIMIT 1");
 $stmt->execute([$portal, $externalChatId]);
 $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-$peerSendable = $row ? grey_peer_likely_sendable(trim((string)$row['peer'])) : false;
-$peerNormalized = $row ? grey_normalize_peer($row['peer']) : '';
+$peerRaw = $row ? trim((string)($row['peer'] ?? '')) : '';
+$peerSend = $row && isset($row['peer_send']) && $row['peer_send'] !== '' ? trim((string)$row['peer_send']) : null;
+$hasSendable = $peerSend !== null && $peerSend !== '';
 
 header('Content-Type: text/html; charset=utf-8');
 ?>
@@ -56,13 +57,14 @@ header('Content-Type: text/html; charset=utf-8');
     <p class="err">No ol_map row found for this portal and external_chat_id. Send a message from Telegram first so the chat is linked.</p>
   <?php else: ?>
     <table>
+      <tr><th>portal</th><td><code><?= htmlspecialchars($portal) ?></code></td></tr>
       <tr><th>tenant_id</th><td><?= htmlspecialchars($row['tenant_id'] ?? '') ?></td></tr>
-      <tr><th>peer (stored)</th><td><code><?= htmlspecialchars($row['peer'] ?? '') ?></code></td></tr>
-      <tr><th>peer (normalized)</th><td><code><?= htmlspecialchars($peerNormalized) ?></code></td></tr>
-      <tr><th>Grey sendable?</th><td class="<?= $peerSendable ? 'ok' : 'err' ?>"><?= $peerSendable ? 'Yes (E.164 or @username)' : 'No — replies may get invalid_peer. Re-link chat with a new message from Telegram.' ?></td></tr>
+      <tr><th>external_chat_id</th><td><code><?= htmlspecialchars($row['external_chat_id'] ?? '') ?></code></td></tr>
+      <tr><th>peer_raw</th><td><code><?= htmlspecialchars($peerRaw) ?></code></td></tr>
+      <tr><th>peer_send</th><td class="<?= $hasSendable ? 'ok' : 'err' ?>"><code><?= $hasSendable ? htmlspecialchars($peerSend) : '—' ?></code> <?= $hasSendable ? '(used for Grey /messages/send)' : '— No sendable peer; replies will be undelivered.' ?></td></tr>
       <tr><th>external_user_id</th><td><code><?= htmlspecialchars($row['external_user_id'] ?? '') ?></code></td></tr>
-      <tr><th>created_at</th><td><?= isset($row['created_at']) ? date('Y-m-d H:i:s', (int)$row['created_at']) : '—' ?></td></tr>
-      <tr><th>updated_at</th><td><?= isset($row['updated_at']) ? date('Y-m-d H:i:s', (int)$row['updated_at']) : '—' ?></td></tr>
+      <tr><th>created_at</th><td><?= isset($row['created_at']) && $row['created_at'] !== null ? date('Y-m-d H:i:s', (int)$row['created_at']) : '—' ?></td></tr>
+      <tr><th>updated_at (last inbound/update)</th><td><?= isset($row['updated_at']) && $row['updated_at'] !== null ? date('Y-m-d H:i:s', (int)$row['updated_at']) : '—' ?></td></tr>
     </table>
   <?php endif; ?>
 </body>

@@ -107,15 +107,23 @@ function ensure_db(): PDO {
   )");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
   $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_portal_chat ON ol_map(portal, external_chat_id)");
-  // One-time migration: if ol_map has line_id (old schema), recreate without line_id
+  // Add peer_send column if missing (sendable peer for Grey: E.164 or @username; peer stays raw e.g. Telegram id)
   $cols = $pdo->query("PRAGMA table_info(ol_map)")->fetchAll(PDO::FETCH_ASSOC);
+  $hasPeerSend = false;
+  foreach ($cols as $c) {
+    if (($c['name'] ?? '') === 'peer_send') { $hasPeerSend = true; break; }
+  }
+  if (!$hasPeerSend) {
+    $pdo->exec("ALTER TABLE ol_map ADD COLUMN peer_send TEXT");
+  }
+  // One-time migration: if ol_map has line_id (old schema), recreate without line_id
   $hasLineId = false;
   foreach ($cols as $c) {
     if (($c['name'] ?? '') === 'line_id') { $hasLineId = true; break; }
   }
   if ($hasLineId) {
-    $pdo->exec("CREATE TABLE ol_map_new (portal TEXT NOT NULL, tenant_id TEXT NOT NULL, peer TEXT NOT NULL, external_user_id TEXT NOT NULL, external_chat_id TEXT NOT NULL, created_at INTEGER, updated_at INTEGER, PRIMARY KEY (portal, tenant_id, peer))");
-    $pdo->exec("INSERT OR IGNORE INTO ol_map_new (portal, tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at) SELECT portal, tenant_id, peer, external_user_id, external_chat_id, NULL, NULL FROM ol_map");
+    $pdo->exec("CREATE TABLE ol_map_new (portal TEXT NOT NULL, tenant_id TEXT NOT NULL, peer TEXT NOT NULL, peer_send TEXT, external_user_id TEXT NOT NULL, external_chat_id TEXT NOT NULL, created_at INTEGER, updated_at INTEGER, PRIMARY KEY (portal, tenant_id, peer))");
+    $pdo->exec("INSERT OR IGNORE INTO ol_map_new (portal, tenant_id, peer, peer_send, external_user_id, external_chat_id, created_at, updated_at) SELECT portal, tenant_id, peer, NULL, external_user_id, external_chat_id, NULL, NULL FROM ol_map");
     $pdo->exec("DROP TABLE ol_map");
     $pdo->exec("ALTER TABLE ol_map_new RENAME TO ol_map");
     $pdo->exec("CREATE INDEX IF NOT EXISTS idx_ol_map_external ON ol_map(portal, external_user_id, external_chat_id)");
@@ -216,44 +224,56 @@ function get_portal_openlines_last_inject(string $portal): ?array {
   return is_array($dec) ? ['at' => (int)($row['openlines_last_inject_at'] ?? 0)] + $dec : null;
 }
 
-/** Get or create ol_map entry: (portal, tenant_id, peer) -> stable (external_user_id, external_chat_id). Returns is_new=true when the row was just created (first message from this peer). */
-function ol_map_get_or_create(string $portal, string $tenantId, string $peer): array {
+/** Get or create ol_map entry: (portal, tenant_id, peer_raw) -> stable (external_user_id, external_chat_id). peer_send stored for outbound. Returns is_new=true when the row was just created. */
+function ol_map_get_or_create(string $portal, string $tenantId, string $peer, ?string $peerSend = null): array {
   $pdo = ensure_db();
   $peer = trim($peer);
   $stmt = $pdo->prepare("SELECT external_user_id, external_chat_id FROM ol_map WHERE portal=? AND tenant_id=? AND peer=?");
   $stmt->execute([$portal, $tenantId, $peer]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
+  $now = time();
   if ($row) {
-    $now = time();
-    $pdo->prepare("UPDATE ol_map SET updated_at=? WHERE portal=? AND tenant_id=? AND peer=?")->execute([$now, $portal, $tenantId, $peer]);
+    $pdo->prepare("UPDATE ol_map SET updated_at=?" . ($peerSend !== null ? ", peer_send=?" : "") . " WHERE portal=? AND tenant_id=? AND peer=?")->execute(
+      $peerSend !== null ? [$now, $peerSend, $portal, $tenantId, $peer] : [$now, $portal, $tenantId, $peer]
+    );
     return ['external_user_id' => $row['external_user_id'], 'external_chat_id' => $row['external_chat_id'], 'is_new' => false];
   }
   $key = $portal . '|' . $tenantId . '|' . $peer;
   $externalUserId = 'tg_u_' . sha1($key);
   $externalChatId = 'tg_c_' . sha1($key);
-  $now = time();
-  $ins = $pdo->prepare("INSERT INTO ol_map (portal, tenant_id, peer, external_user_id, external_chat_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?)");
-  $ins->execute([$portal, $tenantId, $peer, $externalUserId, $externalChatId, $now, $now]);
+  $ins = $pdo->prepare("INSERT INTO ol_map (portal, tenant_id, peer, peer_send, external_user_id, external_chat_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)");
+  $ins->execute([$portal, $tenantId, $peer, $peerSend, $externalUserId, $externalChatId, $now, $now]);
   return ['external_user_id' => $externalUserId, 'external_chat_id' => $externalChatId, 'is_new' => true];
 }
 
-/** Resolve (portal, external_chat_id) to (tenant_id, peer). Primary lookup for outbound — Bitrix may not send correct external user id. */
+/** Update peer_send for an existing ol_map row (e.g. after enriching from CRM). */
+function ol_map_update_peer_send(string $portal, string $tenantId, string $peer, string $peerSend): void {
+  $pdo = ensure_db();
+  $pdo->prepare("UPDATE ol_map SET peer_send=?, updated_at=? WHERE portal=? AND tenant_id=? AND peer=?")
+    ->execute([trim($peerSend), time(), $portal, $tenantId, trim($peer)]);
+}
+
+/** Resolve (portal, external_chat_id) to (tenant_id, peer_raw, peer_send). Primary lookup for outbound. Use peer_send for Grey. */
 function ol_map_find_by_chat_id(string $portal, string $externalChatId): ?array {
   if ($externalChatId === '') return null;
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("SELECT tenant_id, peer, external_user_id FROM ol_map WHERE portal=? AND external_chat_id=? LIMIT 1");
+  $stmt = $pdo->prepare("SELECT tenant_id, peer, peer_send, external_user_id FROM ol_map WHERE portal=? AND external_chat_id=? LIMIT 1");
   $stmt->execute([$portal, $externalChatId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
-  return $row ? ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer']] : null;
+  if (!$row) return null;
+  $peerSend = isset($row['peer_send']) && $row['peer_send'] !== '' ? $row['peer_send'] : null;
+  return ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer'], 'peer_raw' => $row['peer'], 'peer_send' => $peerSend];
 }
 
-/** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer) for sending to Grey. Use ol_map_find_by_chat_id first for outbound. */
+/** Resolve (portal, external_user_id, external_chat_id) to (tenant_id, peer_send). Use ol_map_find_by_chat_id first for outbound. */
 function ol_map_resolve_to_peer(string $portal, string $externalUserId, string $externalChatId): ?array {
   $pdo = ensure_db();
-  $stmt = $pdo->prepare("SELECT tenant_id, peer FROM ol_map WHERE portal=? AND external_user_id=? AND external_chat_id=?");
+  $stmt = $pdo->prepare("SELECT tenant_id, peer, peer_send FROM ol_map WHERE portal=? AND external_user_id=? AND external_chat_id=?");
   $stmt->execute([$portal, $externalUserId, $externalChatId]);
   $row = $stmt->fetch(PDO::FETCH_ASSOC);
-  return $row ? ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer']] : null;
+  if (!$row) return null;
+  $peerSend = isset($row['peer_send']) && $row['peer_send'] !== '' ? $row['peer_send'] : null;
+  return ['tenant_id' => $row['tenant_id'], 'peer' => $row['peer'], 'peer_raw' => $row['peer'], 'peer_send' => $peerSend];
 }
 
 /** @deprecated Use ol_map_resolve_to_peer. Kept for backward compatibility. */

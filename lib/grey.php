@@ -127,6 +127,25 @@ function grey_peer_likely_sendable(string $peer): bool {
 }
 
 /**
+ * Build sendable peer for Grey /messages/send from inbound data.
+ * Grey accepts: E.164 phone, @username, or (per API) numeric id — but numeric id often causes invalid_peer, so we prefer E.164 or @username.
+ * Returns: E.164 phone if available, else @username if available, else null (no sendable peer).
+ */
+function grey_get_send_peer(?string $phone, ?string $senderUsername): ?string {
+  $phone = $phone !== null && $phone !== '' ? trim($phone) : null;
+  $senderUsername = $senderUsername !== null && $senderUsername !== '' ? trim($senderUsername) : null;
+  if ($phone !== null) {
+    $normalized = grey_normalize_peer($phone);
+    if ($normalized !== '' && grey_peer_likely_sendable($normalized)) return $normalized;
+  }
+  if ($senderUsername !== null) {
+    $u = (strpos($senderUsername, '@') === 0) ? $senderUsername : ('@' . $senderUsername);
+    return $u;
+  }
+  return null;
+}
+
+/**
  * Resolve Grey tenant credentials for outbound (Open Lines, deal send, etc.).
  * Primary key is (portal, tenant_id) in user_settings; we fallback to any row with this tenant_id
  * to be robust if portal was changed or not stored consistently.

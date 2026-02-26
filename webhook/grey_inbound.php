@@ -740,13 +740,37 @@ try {
     log_openlines('Open Lines not configured (no line_id for portal)', ['portal' => $portal]);
   }
   $connectorId = cfg('OPENLINES_CONNECTOR_ID') ?: 'telegram_grey';
-  // Store the exact peer string Grey expects for outbound (E.164 or @username when possible; same format Deal uses)
-  $peer = grey_normalize_peer($phone ?: $chatId ?: '');
-  if ($peer === '') $peer = $phone ?: $chatId ?: '';
-  if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '') {
+  // peer_raw = stable key for ol_map row (Telegram id or phone); peer_send = value for Grey /messages/send (E.164 or @username only)
+  $peerRaw = $phone ?: $chatId ?: '';
+  $peerSend = grey_get_send_peer($isPhoneNumber ? $phone : null, $senderUsername);
+  if ($portal && $lineId !== null && $lineId !== '' && $tenantId !== null && $tenantId !== '' && $peerRaw !== '') {
     try {
-      $ext = ol_map_get_or_create($portal, (string)$tenantId, $peer);
-      @error_log('[Inbound->OL] map saved portal=' . $portal . ' peer=' . $peer . ' external_chat_id=' . ($ext['external_chat_id'] ?? '') . ' external_user_id=' . ($ext['external_user_id'] ?? ''));
+      $ext = ol_map_get_or_create($portal, (string)$tenantId, $peerRaw, $peerSend);
+      // Optional: enrich peer_send from CRM contact phone when Grey payload had no phone/username
+      if (($peerSend === null || $peerSend === '') && $contactId > 0) {
+        try {
+          $auth = b24_get_stored_auth($portal);
+          if ($auth) {
+            $c = b24_call('crm.contact.get', ['id' => $contactId], $auth);
+            $phones = $c['result']['PHONE'] ?? [];
+            $contactPhone = $phones ? ($phones[0]['VALUE'] ?? null) : null;
+            if ($contactPhone !== null && $contactPhone !== '') {
+              $p = normalize_phone((string)$contactPhone);
+              if ($p && grey_peer_likely_sendable(grey_normalize_peer($p) ?: $p)) {
+                ol_map_update_peer_send($portal, (string)$tenantId, $peerRaw, $p);
+                $peerSend = $p;
+                log_openlines('Inbound OL: peer_send enriched from CRM contact phone', ['portal' => $portal, 'peer_raw' => $peerRaw, 'peer_send' => $peerSend]);
+              }
+            }
+          }
+        } catch (Throwable $e) {
+          log_debug('CRM fallback for peer_send failed', ['contact_id' => $contactId, 'error' => $e->getMessage()]);
+        }
+      }
+      @error_log('[Inbound->OL] map saved portal=' . $portal . ' peer_raw=' . $peerRaw . ' peer_send=' . ($peerSend ?? '') . ' external_chat_id=' . ($ext['external_chat_id'] ?? '') . ' external_user_id=' . ($ext['external_user_id'] ?? ''));
+      if ($peerSend === null || $peerSend === '') {
+        log_openlines('Inbound OL map: no sendable peer', ['portal' => $portal, 'peer_raw' => $peerRaw]);
+      }
       log_openlines('Inbound inject attempt', [
         'portal' => $portal,
         'line_id' => $lineId,
@@ -757,7 +781,7 @@ try {
       ]);
       $messageId = 'tg_' . substr($ext['external_chat_id'], 0, 12) . '_' . time() . '_' . bin2hex(random_bytes(4));
       // Bitrix: name/last_name only letters, spaces, hyphens, apostrophes; max 25 chars each
-      $rawDisplay = $senderUsername ? ('@' . ltrim($senderUsername, '@')) : ($isPhoneNumber ? ('Tel ' . $phone) : ('User ' . $peer));
+      $rawDisplay = $senderUsername ? ('@' . ltrim($senderUsername, '@')) : ($isPhoneNumber ? ('Tel ' . $phone) : ('User ' . $peerRaw));
       $sanitized = preg_replace("/[^a-zA-Z\\s\\-\\'\\p{L}]/u", '', $rawDisplay);
       $sanitized = trim($sanitized);
       if ($sanitized === '') $sanitized = 'Telegram';
@@ -802,7 +826,7 @@ try {
         $first = is_array($res) && isset($res[0]) ? $res[0] : (is_array($res) ? $res : []);
         $sessionId = $first['session']['ID'] ?? $first['session']['id'] ?? null;
         $olChatId = $first['session']['CHAT_ID'] ?? $first['session']['chat_id'] ?? null;
-        log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer' => $peer, 'session_id' => $sessionId, 'chat_id' => $olChatId]);
+        log_debug('Open Lines inbound injected', ['portal' => $portal, 'line_id' => $lineId, 'peer_raw' => $peerRaw, 'peer_send' => $peerSend, 'session_id' => $sessionId, 'chat_id' => $olChatId]);
         log_openlines('Inbound injected OK', ['portal' => $portal, 'line_id' => $lineId, 'session_id' => $sessionId, 'external_chat_id' => $ext['external_chat_id'] ?? null]);
         set_portal_openlines_last_inject($portal, true, ['session_id' => $sessionId, 'chat_id' => $olChatId]);
 
@@ -825,7 +849,7 @@ try {
             // Chat URL: default /online/im/chat/{id}/. Override with OPENLINES_CHAT_PATH in config (use {CHAT_ID} placeholder), e.g. '/online/im/chat/{CHAT_ID}/' or '/online/?dialog=im&chatId={CHAT_ID}'.
             $chatPathTemplate = cfg('OPENLINES_CHAT_PATH', '/online/im/chat/{CHAT_ID}/');
             $openLinesChatUrl = 'https://' . $portal . str_replace('{CHAT_ID}', (string)(int)$olChatId, $chatPathTemplate);
-            $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $peer);
+            $fromLabel = $isPhoneNumber ? $phone : ($senderUsername ? '@' . $senderUsername : 'User ' . $peerRaw);
             try {
               b24_call('im.notify', [
                 'to' => $notifyUserId,

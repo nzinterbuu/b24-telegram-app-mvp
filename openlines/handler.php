@@ -230,12 +230,12 @@ if (!$mapping) {
 }
 
 $tenantId = $mapping['tenant_id'];
-$peer = trim((string)$mapping['peer']);
-$peer = grey_normalize_peer($peer) ?: $peer;
+$peerRaw = isset($mapping['peer_raw']) ? trim((string)$mapping['peer_raw']) : trim((string)$mapping['peer']);
+$peerSend = isset($mapping['peer_send']) && $mapping['peer_send'] !== '' ? trim((string)$mapping['peer_send']) : null;
 
-// Reject peer format that Grey typically rejects (digits-only without + or @) to avoid invalid_peer
-if (!grey_peer_likely_sendable($peer)) {
-  handler_log('Peer not sendable (use E.164 or @username)', ['peer' => $peer, 'external_chat_id' => $externalChatId]);
+// Use only peer_send for Grey (E.164 or @username). If missing, mark undelivered and return.
+if ($peerSend === null || $peerSend === '') {
+  handler_log('No peer_send (recipient has no sendable identifier)', ['peer_raw' => $peerRaw, 'external_chat_id' => $externalChatId]);
   try {
     $auth = b24_get_stored_auth($portal);
     if ($auth && !empty($messageIds) && $externalChatId !== '') {
@@ -250,16 +250,15 @@ if (!grey_peer_likely_sendable($peer)) {
           ]),
         ],
       ], $auth);
-      handler_log('undelivered sent (peer not sendable)', []);
+      handler_log('undelivered sent (no peer_send)', []);
     }
   } catch (Throwable $e2) {
     handler_log('undelivered status failed', ['error' => $e2->getMessage()]);
   }
-  json_response(['ok' => false, 'error' => 'Peer format not sendable. Send a new message from Telegram so the chat is re-linked with E.164 or @username.']);
+  json_response(['ok' => false, 'error' => 'Recipient has no sendable identifier (no phone/username). Send a new message from Telegram with phone or @username so the chat can receive replies.']);
   exit;
 }
 
-// Always use the tenant_id from ol_map for Grey — that tenant has the chat with this peer.
 $sendTenantId = (string)$tenantId;
 $creds = grey_get_tenant_credentials($portal, $sendTenantId);
 $apiToken = $creds['api_token'] ?? null;
@@ -271,7 +270,7 @@ $greyOk = false;
 $sent = null;
 try {
   $sent = grey_call($sendTenantId, $apiToken, '/messages/send', 'POST', [
-    'peer' => $peer,
+    'peer' => $peerSend,
     'text' => $text,
     'allow_import_contact' => true,
   ]);
@@ -301,7 +300,7 @@ try {
   exit;
 }
 
-message_log_insert('out', $portal, $sendTenantId, $peer, $text, null, 'openlines', null);
+message_log_insert('out', $portal, $sendTenantId, $peerSend, $text, null, 'openlines', null);
 
 // ——— Mark delivered in Bitrix: message.id must be array; forward 'im' from event ———
 $deliveryOk = false;
@@ -331,4 +330,4 @@ if (!empty($messageIds)) {
   }
 }
 
-json_response(['ok' => true, 'peer' => $peer, 'grey' => $sent, 'delivery_sent' => $deliveryOk]);
+json_response(['ok' => true, 'peer' => $peerSend, 'grey' => $sent, 'delivery_sent' => $deliveryOk]);
