@@ -234,6 +234,8 @@ $peer = $mapping['peer'];
 
 $creds = grey_get_tenant_credentials($portal, (string)$tenantId);
 $apiToken = $creds['api_token'] ?? null;
+// When using portal fallback, creds may have a different tenant_id; use it for Grey so send works
+$sendTenantId = isset($creds['tenant_id']) ? (string)$creds['tenant_id'] : (string)$tenantId;
 
 if (!$apiToken) {
   handler_log('No api_token for tenant', ['tenant_id' => $tenantId, 'portal' => $portal]);
@@ -257,14 +259,14 @@ if (!$apiToken) {
   } catch (Throwable $e2) {
     handler_log('undelivered status failed (no api_token)', ['error' => $e2->getMessage()]);
   }
-  json_response(['ok' => false, 'error' => 'No API token for this tenant. Configure the app for this Telegram connection.']);
+  json_response(['ok' => false, 'error' => 'No API token for this tenant. Open the app in Bitrix24 → Settings, then save the API token for your Grey Telegram connection (tenant_id: ' . $tenantId . ').']);
   exit;
 }
 
 $greyOk = false;
 $sent = null;
 try {
-  $sent = grey_call($tenantId, $apiToken, '/messages/send', 'POST', [
+  $sent = grey_call($sendTenantId, $apiToken, '/messages/send', 'POST', [
     'peer' => $peer,
     'text' => $text,
     'allow_import_contact' => true,
@@ -295,7 +297,7 @@ try {
   exit;
 }
 
-message_log_insert('out', $portal, $tenantId, $peer, $text, null, 'openlines', null);
+message_log_insert('out', $portal, $sendTenantId, $peer, $text, null, 'openlines', null);
 
 // ——— Mark delivered in Bitrix: message.id must be array; forward 'im' from event ———
 $deliveryOk = false;

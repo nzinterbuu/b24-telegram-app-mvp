@@ -141,5 +141,26 @@ function grey_get_tenant_credentials(string $portal, string $tenantId): ?array {
     ];
   }
 
+  // 3) Portal fallback: any configured connection on this portal (e.g. inbound used first_portal or token never saved for this tenant)
+  if ($portal !== '') {
+    $stmt = $pdo->prepare("SELECT portal, tenant_id, api_token, user_id, phone FROM user_settings WHERE portal=? AND (api_token IS NOT NULL AND api_token != '') LIMIT 1");
+    $stmt->execute([$portal]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+      log_debug('grey_get_tenant_credentials portal fallback', [
+        'requested_tenant_id' => $tenantId,
+        'portal' => $portal,
+        'using_tenant_id' => $row['tenant_id'],
+      ]);
+      return [
+        'portal' => $row['portal'],
+        'tenant_id' => $row['tenant_id'],
+        'api_token' => $row['api_token'],
+        'user_id' => (int)($row['user_id'] ?? 0),
+        'phone' => $row['phone'] ?? null,
+      ];
+    }
+  }
+
   return null;
 }
